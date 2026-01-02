@@ -448,3 +448,209 @@ export async function loadGameSounds(audioManager) {
   await Promise.all(loadPromises);
   console.log('Game sounds loaded');
 }
+
+/**
+ * EngineAudio - Manages engine sound with dynamic pitch/volume based on RPM
+ */
+export class EngineAudio {
+  constructor(audioManager) {
+    this.audio = audioManager;
+    this.idleLoop = null;
+    this.revLoop = null;
+    this.isRunning = false;
+    this.currentRpm = 0;
+    this.targetRpm = 0;
+    this.minRpm = 800;
+    this.maxRpm = 6000;
+  }
+
+  /**
+   * Start the engine
+   */
+  async start() {
+    if (this.isRunning) return;
+
+    // Play engine start sound
+    this.audio.playSound(GameSounds.ENGINE_START, {
+      category: AudioCategory.SFX,
+      volume: 0.6,
+    });
+
+    // Wait for start sound to play a bit, then start loops
+    setTimeout(() => {
+      this.isRunning = true;
+      this.startLoops();
+    }, 500);
+  }
+
+  /**
+   * Start engine loops
+   */
+  startLoops() {
+    // Start idle loop
+    this.idleLoop = this.audio.playLoop(GameSounds.ENGINE_IDLE, {
+      category: AudioCategory.SFX,
+      volume: 0.4,
+      pitch: 1.0,
+    });
+
+    // Start rev loop (initially quiet)
+    this.revLoop = this.audio.playLoop(GameSounds.ENGINE_REV, {
+      category: AudioCategory.SFX,
+      volume: 0.0,
+      pitch: 0.8,
+    });
+  }
+
+  /**
+   * Stop the engine
+   */
+  stop() {
+    this.isRunning = false;
+    if (this.idleLoop) {
+      this.idleLoop.stop();
+      this.idleLoop = null;
+    }
+    if (this.revLoop) {
+      this.revLoop.stop();
+      this.revLoop = null;
+    }
+  }
+
+  /**
+   * Update engine audio based on speed and throttle
+   * @param {number} speed - Current speed in m/s
+   * @param {number} throttle - Throttle input (0-1)
+   * @param {number} maxSpeed - Maximum speed in m/s
+   */
+  update(speed, throttle, maxSpeed = 30) {
+    if (!this.isRunning) return;
+
+    // Calculate target RPM based on speed and throttle
+    const speedFactor = Math.min(speed / maxSpeed, 1);
+    const throttleFactor = throttle * 0.3; // Throttle adds some RPM
+
+    // RPM follows speed primarily, with throttle adding responsiveness
+    this.targetRpm = this.minRpm + (this.maxRpm - this.minRpm) * (speedFactor * 0.7 + throttleFactor);
+
+    // Smoothly interpolate to target RPM
+    this.currentRpm += (this.targetRpm - this.currentRpm) * 0.1;
+
+    // Calculate normalized RPM (0-1)
+    const rpmNormalized = (this.currentRpm - this.minRpm) / (this.maxRpm - this.minRpm);
+
+    // Update idle loop - quieter at higher RPM
+    if (this.idleLoop) {
+      const idleVolume = Math.max(0.1, 0.4 * (1 - rpmNormalized * 0.7));
+      const idlePitch = 0.9 + rpmNormalized * 0.3;
+      this.idleLoop.setVolume(idleVolume);
+      this.idleLoop.setPitch(idlePitch);
+    }
+
+    // Update rev loop - louder at higher RPM
+    if (this.revLoop) {
+      const revVolume = Math.min(0.6, rpmNormalized * 0.8);
+      const revPitch = 0.7 + rpmNormalized * 0.6;
+      this.revLoop.setVolume(revVolume);
+      this.revLoop.setPitch(revPitch);
+    }
+  }
+
+  /**
+   * Check if engine is running
+   * @returns {boolean}
+   */
+  getIsRunning() {
+    return this.isRunning;
+  }
+}
+
+/**
+ * HornAudio - Synthesizes a truck horn sound using Web Audio API
+ */
+export class HornAudio {
+  constructor(audioManager) {
+    this.audio = audioManager;
+    this.oscillators = [];
+    this.gainNode = null;
+    this.isPlaying = false;
+  }
+
+  /**
+   * Play the horn sound
+   */
+  play() {
+    if (!this.audio.isInitialized() || this.isPlaying) return;
+
+    const ctx = this.audio.audioContext;
+    const sfxGain = this.audio.categoryGains.get(AudioCategory.SFX);
+
+    // Create main gain node for horn
+    this.gainNode = ctx.createGain();
+    this.gainNode.gain.setValueAtTime(0, ctx.currentTime);
+    this.gainNode.gain.linearRampToValueAtTime(0.4, ctx.currentTime + 0.05);
+    this.gainNode.connect(sfxGain || this.audio.masterGain);
+
+    // Create multiple oscillators for a richer horn sound
+    // Truck horn typically uses low frequencies
+    const frequencies = [110, 147, 175]; // Low A, D, F - creates a deep horn chord
+
+    for (const freq of frequencies) {
+      const osc = ctx.createOscillator();
+      const oscGain = ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+
+      // Add slight detuning for richness
+      osc.detune.setValueAtTime(Math.random() * 10 - 5, ctx.currentTime);
+
+      oscGain.gain.setValueAtTime(0.3, ctx.currentTime);
+
+      osc.connect(oscGain);
+      oscGain.connect(this.gainNode);
+      osc.start();
+
+      this.oscillators.push({ osc, gain: oscGain });
+    }
+
+    this.isPlaying = true;
+  }
+
+  /**
+   * Stop the horn sound
+   */
+  stop() {
+    if (!this.isPlaying) return;
+
+    const ctx = this.audio.audioContext;
+
+    // Fade out
+    if (this.gainNode) {
+      this.gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.1);
+    }
+
+    // Stop oscillators after fade
+    setTimeout(() => {
+      for (const { osc } of this.oscillators) {
+        try {
+          osc.stop();
+        } catch (e) {
+          // Already stopped
+        }
+      }
+      this.oscillators = [];
+      this.gainNode = null;
+      this.isPlaying = false;
+    }, 150);
+  }
+
+  /**
+   * Quick honk (play and auto-stop)
+   * @param {number} duration - Duration in ms
+   */
+  honk(duration = 300) {
+    this.play();
+    setTimeout(() => this.stop(), duration);
+  }
+}

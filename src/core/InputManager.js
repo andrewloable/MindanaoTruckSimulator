@@ -31,6 +31,7 @@ export const InputAction = {
   RADIO_TOGGLE: 'radioToggle',
   RADIO_NEXT: 'radioNext',
   RADIO_PREV: 'radioPrev',
+  REFUEL: 'refuel',
 };
 
 // Default gamepad button/axis mappings (standard gamepad layout)
@@ -108,6 +109,7 @@ const DEFAULT_KEY_BINDINGS = {
   'KeyR': InputAction.RADIO_TOGGLE,
   'BracketRight': InputAction.RADIO_NEXT,
   'BracketLeft': InputAction.RADIO_PREV,
+  'KeyF': InputAction.REFUEL,
 };
 
 export class InputManager {

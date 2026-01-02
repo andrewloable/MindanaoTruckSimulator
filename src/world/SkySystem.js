@@ -34,6 +34,11 @@ export class SkySystem {
 
     // Time of day (0-24 hours)
     this.timeOfDay = 10;
+
+    // Day/night cycle settings
+    this.cycleEnabled = true;
+    this.timeScale = 60; // 1 real second = 60 game seconds (1 minute)
+    this.ambientLight = null;
   }
 
   /**
@@ -249,12 +254,122 @@ export class SkySystem {
 
   /**
    * Update (called each frame)
-   * @param {number} deltaTime
+   * @param {number} deltaTime - Time in seconds since last frame
    */
   update(deltaTime) {
-    // Sky follows camera to create infinite sky illusion
-    // (The sky sphere is large enough that this isn't strictly necessary,
-    // but it helps prevent any potential clipping issues)
+    // Progress time if cycle is enabled
+    if (this.cycleEnabled) {
+      // Convert real time to game time
+      const gameTimeAdvance = (deltaTime * this.timeScale) / 3600; // Convert seconds to hours
+      this.timeOfDay += gameTimeAdvance;
+
+      // Wrap around at 24 hours
+      if (this.timeOfDay >= 24) {
+        this.timeOfDay -= 24;
+      }
+
+      // Update sun position and colors
+      this.setTimeOfDay(this.timeOfDay);
+
+      // Update lighting
+      this.updateLighting();
+    }
+  }
+
+  /**
+   * Set the ambient light reference (from Game.js)
+   * @param {THREE.AmbientLight} light
+   */
+  setAmbientLight(light) {
+    this.ambientLight = light;
+  }
+
+  /**
+   * Update lighting based on time of day
+   */
+  updateLighting() {
+    const elevation = this.parameters.elevation;
+
+    // Calculate light intensity based on sun elevation
+    let sunIntensity, ambientIntensity;
+    let sunColor = new THREE.Color();
+
+    if (elevation > 30) {
+      // Midday - full brightness
+      sunIntensity = 1.2;
+      ambientIntensity = 0.5;
+      sunColor.setHex(0xffffff);
+    } else if (elevation > 10) {
+      // Morning/evening - warm light
+      const t = (elevation - 10) / 20;
+      sunIntensity = 0.8 + t * 0.4;
+      ambientIntensity = 0.3 + t * 0.2;
+      sunColor.setHex(0xffddaa);
+    } else if (elevation > 0) {
+      // Sunrise/sunset - orange/red light
+      const t = elevation / 10;
+      sunIntensity = 0.3 + t * 0.5;
+      ambientIntensity = 0.2 + t * 0.1;
+      sunColor.setHex(0xff8844);
+    } else {
+      // Night - dim blue ambient only
+      sunIntensity = 0.0;
+      ambientIntensity = 0.1;
+      sunColor.setHex(0x4466aa);
+    }
+
+    // Apply to sun light
+    if (this.sunLight) {
+      this.sunLight.intensity = sunIntensity;
+      this.sunLight.color.copy(sunColor);
+    }
+
+    // Apply to ambient light
+    if (this.ambientLight) {
+      this.ambientLight.intensity = ambientIntensity;
+      // Tint ambient based on time
+      if (elevation < 0) {
+        this.ambientLight.color.setHex(0x334466); // Blue night ambient
+      } else if (elevation < 10) {
+        this.ambientLight.color.setHex(0xffaa88); // Warm sunrise/sunset
+      } else {
+        this.ambientLight.color.setHex(0xffffff); // White day ambient
+      }
+    }
+  }
+
+  /**
+   * Enable or disable automatic day/night cycle
+   * @param {boolean} enabled
+   */
+  setCycleEnabled(enabled) {
+    this.cycleEnabled = enabled;
+  }
+
+  /**
+   * Set the time scale (how fast time passes)
+   * @param {number} scale - Multiplier (60 = 1 real second is 1 game minute)
+   */
+  setTimeScale(scale) {
+    this.timeScale = scale;
+  }
+
+  /**
+   * Check if it's currently night time
+   * @returns {boolean}
+   */
+  isNight() {
+    return this.timeOfDay < 6 || this.timeOfDay > 18;
+  }
+
+  /**
+   * Get formatted time string (HH:MM)
+   * @returns {string}
+   */
+  getFormattedTime() {
+    const hours = Math.floor(this.timeOfDay);
+    const minutes = Math.floor((this.timeOfDay - hours) * 60);
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
   }
 
   /**

@@ -10,7 +10,9 @@ import { InputManager, InputAction } from './InputManager.js';
 import { SkySystem } from '../world/SkySystem.js';
 import { RoadGenerator } from '../world/RoadGenerator.js';
 import { PhysicsSystem } from '../systems/PhysicsSystem.js';
-import { AudioManager, AudioCategory } from '../systems/AudioManager.js';
+import { AudioManager, AudioCategory, loadGameSounds, EngineAudio, HornAudio } from '../systems/AudioManager.js';
+import { FuelSystem } from '../systems/FuelSystem.js';
+import { Notification } from '../ui/Notification.js';
 import { UIManager } from '../ui/UIManager.js';
 import { MainMenu } from '../ui/MainMenu.js';
 import { PauseMenu } from '../ui/PauseMenu.js';
@@ -53,6 +55,10 @@ export class Game {
     this.radioSystem = null;
     this.radioWidget = null;
     this.garage = null;
+    this.notification = null;
+    this.engineAudio = null;
+    this.hornAudio = null;
+    this.fuelSystem = null;
 
     // Game state
     this.gameState = 'menu'; // menu, playing, paused
@@ -138,6 +144,8 @@ export class Game {
     this.skySystem = new SkySystem(this.scene, this.renderer);
     this.skySystem.init();
     this.skySystem.setTimeOfDay(10); // 10 AM
+    this.skySystem.setSunLight(this.sunLight);
+    this.skySystem.setAmbientLight(this.ambientLight);
 
     updateLoadingProgress(60);
 
@@ -186,8 +194,9 @@ export class Game {
   setupInputCallbacks() {
     // Horn - play sound on press
     this.input.onAction(InputAction.HORN, () => {
-      console.log('HONK! 📯');
-      // TODO: Play horn sound
+      if (this.hornAudio) {
+        this.hornAudio.honk(400);
+      }
     });
 
     // Toggle headlights
@@ -239,6 +248,11 @@ export class Game {
     // Toggle garage
     this.input.onAction(InputAction.TOGGLE_GARAGE, () => {
       this.toggleGarage();
+    });
+
+    // Refuel
+    this.input.onAction(InputAction.REFUEL, () => {
+      this.tryRefuel();
     });
   }
 
@@ -311,9 +325,57 @@ export class Game {
     this.garage.onPurchase = (truckId, price) => {
       this.playerMoney -= price;
       this.hud.updateMoney(this.playerMoney);
+      if (this.notification) {
+        this.notification.showMoneySpent(price, 'Truck purchase');
+      }
     };
     this.garage.onSelectTruck = (truckId) => {
       this.changeTruck(truckId);
+    };
+
+    // Create Notification system
+    this.notification = new Notification(this.ui);
+    this.notification.init();
+
+    // Create Fuel System
+    this.fuelSystem = new FuelSystem();
+    this.fuelSystem.onFuelLow = (level, percent) => {
+      if (this.notification) {
+        this.notification.show({
+          type: 'warning',
+          title: 'Low Fuel',
+          message: `Only ${Math.round(level)}L remaining. Find a gas station!`,
+          icon: '\u26FD',
+          duration: 5000,
+        });
+      }
+    };
+    this.fuelSystem.onFuelEmpty = () => {
+      if (this.notification) {
+        this.notification.show({
+          type: 'error',
+          title: 'Out of Fuel',
+          message: 'Your truck has run out of fuel!',
+          icon: '\u26FD',
+          duration: 0, // Don't auto-hide
+        });
+      }
+    };
+    this.fuelSystem.onRefuelAvailable = (station) => {
+      if (this.notification) {
+        this.notification.show({
+          type: 'info',
+          title: 'Gas Station',
+          message: 'Press F to refuel',
+          icon: '\u26FD',
+          duration: 3000,
+        });
+      }
+    };
+    this.fuelSystem.onRefuelComplete = (liters, cost) => {
+      if (this.notification) {
+        this.notification.showMoneySpent(cost, `Refueled ${Math.round(liters)}L`);
+      }
     };
 
     // Show main menu initially
@@ -377,6 +439,11 @@ export class Game {
     // Initialize audio on first user interaction
     if (!this.audio.isInitialized()) {
       await this.audio.init();
+      // Load game sounds
+      await loadGameSounds(this.audio);
+      // Create engine and horn audio managers
+      this.engineAudio = new EngineAudio(this.audio);
+      this.hornAudio = new HornAudio(this.audio);
     }
 
     this.gameState = 'playing';
@@ -386,7 +453,13 @@ export class Game {
     this.hud.setMoney(this.playerMoney);
     this.miniMap.show();
     this.radioWidget.show();
-    console.log('Game started - WASD to drive! Press J for Jobs, R for Radio');
+
+    // Start engine audio
+    if (this.engineAudio && !this.engineAudio.getIsRunning()) {
+      this.engineAudio.start();
+    }
+
+    console.log('Game started - WASD to drive! Press J for Jobs, R for Radio, H for Horn');
   }
 
   /**
@@ -410,6 +483,11 @@ export class Game {
     this.miniMap.hide();
     this.radioWidget.hide();
     this.mainMenu.show();
+
+    // Stop engine audio
+    if (this.engineAudio) {
+      this.engineAudio.stop();
+    }
 
     // Reset truck position
     if (this.truckBody) {
@@ -445,6 +523,39 @@ export class Game {
     // Update balance before showing
     this.garage.updateBalance(this.playerMoney);
     this.garage.toggle();
+  }
+
+  /**
+   * Try to refuel at a gas station
+   */
+  tryRefuel() {
+    if (this.gameState !== 'playing') return;
+    if (!this.fuelSystem || !this.fuelSystem.canRefuel) return;
+
+    const cost = this.fuelSystem.getFullTankCost();
+
+    // Check if player has enough money
+    if (this.playerMoney < cost) {
+      if (this.notification) {
+        this.notification.show({
+          type: 'warning',
+          title: 'Not Enough Money',
+          message: `Need \u20B1${cost.toLocaleString()} to fill tank`,
+          icon: '\uD83D\uDCB0',
+        });
+      }
+      return;
+    }
+
+    // Refuel
+    const result = this.fuelSystem.refuel();
+    if (result.litersAdded > 0) {
+      this.playerMoney -= result.cost;
+      if (this.hud) {
+        this.hud.setMoney(this.playerMoney);
+        this.hud.setFuel(this.fuelSystem.getFuelPercent());
+      }
+    }
   }
 
   /**
@@ -501,7 +612,7 @@ export class Game {
    * @param {Object} job
    */
   onJobCompleted(job) {
-    console.log(`Job completed! Earned ₱${job.finalPayment}`);
+    console.log(`Job completed! Earned \u20B1${job.finalPayment}`);
 
     // Add payment to player money
     this.playerMoney += job.finalPayment;
@@ -517,7 +628,10 @@ export class Game {
       this.hud.setMoney(this.playerMoney);
     }
 
-    // TODO: Show completion notification
+    // Show completion notification
+    if (this.notification) {
+      this.notification.showJobCompleted(job);
+    }
   }
 
   /**
@@ -543,7 +657,10 @@ export class Game {
       this.hud.setMoney(this.playerMoney);
     }
 
-    // TODO: Show failure notification
+    // Show failure notification
+    if (this.notification) {
+      this.notification.showJobFailed(job);
+    }
   }
 
   /**
@@ -551,8 +668,8 @@ export class Game {
    */
   setupLighting() {
     // Ambient light for base illumination
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    this.scene.add(ambientLight);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+    this.scene.add(this.ambientLight);
 
     // Directional light (sun)
     this.sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -885,6 +1002,17 @@ export class Game {
     // Update camera
     this.updateCamera(deltaTime);
 
+    // Update sky system (day/night cycle)
+    if (this.skySystem) {
+      this.skySystem.update(deltaTime);
+
+      // Auto-enable headlights at night
+      if (this.skySystem.isNight() && !this.headlightsOn) {
+        this.headlightsOn = true;
+        this.updateHeadlights();
+      }
+    }
+
     // Update radio system
     if (this.radioSystem) {
       this.radioSystem.update(deltaTime);
@@ -893,6 +1021,29 @@ export class Game {
     // Update radio widget
     if (this.radioWidget) {
       this.radioWidget.update();
+    }
+
+    // Update engine audio based on speed and throttle
+    if (this.engineAudio) {
+      const throttle = this.input.getThrottleInput();
+      this.engineAudio.update(this.truckSpeed, throttle, 30);
+    }
+
+    // Update fuel system
+    if (this.fuelSystem) {
+      const throttle = this.input.getThrottleInput();
+      this.fuelSystem.update(this.truckSpeed, throttle, deltaTime);
+
+      // Check if near gas station (using test position for now)
+      // In full implementation, this would use POI data from roadGenerator
+      const gasStations = [{ x: 20, z: 30, name: 'Test Gas Station' }];
+      if (this.testTruck) {
+        this.fuelSystem.checkNearGasStation(
+          this.testTruck.position.x,
+          this.testTruck.position.z,
+          gasStations
+        );
+      }
     }
 
     // Update HUD
@@ -911,6 +1062,11 @@ export class Game {
     // Update time from sky system
     if (this.skySystem) {
       this.hud.setTime(this.skySystem.timeOfDay);
+    }
+
+    // Update fuel from fuel system
+    if (this.fuelSystem) {
+      this.hud.setFuel(this.fuelSystem.getFuelPercent());
     }
 
     // Update GPS location from truck position
