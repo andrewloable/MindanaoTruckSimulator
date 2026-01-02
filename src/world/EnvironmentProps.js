@@ -2,9 +2,98 @@
  * EnvironmentProps - Low-poly environment objects
  *
  * Creates trees, buildings, and other scenery for the game world.
+ * Uses GLB models from Kenney's asset packs (CC0 License)
  */
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// Shared GLTFLoader instance
+const gltfLoader = new GLTFLoader();
+
+// Model cache for instancing
+const modelCache = {};
+
+/**
+ * Load a GLB model with caching
+ * @param {string} path - Path to GLB file
+ * @returns {Promise<THREE.Group>}
+ */
+async function loadModel(path) {
+  if (modelCache[path]) {
+    return modelCache[path].clone();
+  }
+
+  return new Promise((resolve, reject) => {
+    gltfLoader.load(
+      path,
+      (gltf) => {
+        modelCache[path] = gltf.scene;
+        resolve(gltf.scene.clone());
+      },
+      undefined,
+      reject
+    );
+  });
+}
+
+/**
+ * Create a tree using GLB model
+ * @param {string} type - 'regular' | 'pine'
+ * @param {number} scale - Scale factor
+ * @returns {Promise<THREE.Group>}
+ */
+export async function createTreeGLB(type = 'regular', scale = 1.5) {
+  const path = type === 'pine'
+    ? '/models/environment/tree-pine.glb'
+    : '/models/environment/tree.glb';
+
+  try {
+    const model = await loadModel(path);
+    model.scale.set(scale, scale, scale);
+
+    // Enable shadows
+    model.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    return model;
+  } catch (error) {
+    console.warn('Failed to load tree GLB, using fallback:', error);
+    return type === 'pine' ? createPineTree(8 * scale) : createPalmTree(10 * scale);
+  }
+}
+
+/**
+ * Create a building using GLB model
+ * @param {string} variant - 'a' | 'b' | 'c' | 'd'
+ * @param {number} scale - Scale factor
+ * @returns {Promise<THREE.Group>}
+ */
+export async function createBuildingGLB(variant = 'a', scale = 2.0) {
+  const path = `/models/buildings/building-${variant}.glb`;
+
+  try {
+    const model = await loadModel(path);
+    model.scale.set(scale, scale, scale);
+
+    // Enable shadows
+    model.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    return model;
+  } catch (error) {
+    console.warn('Failed to load building GLB, using fallback:', error);
+    return createBuilding({ height: 6 * scale });
+  }
+}
 
 /**
  * Create a low-poly palm tree
