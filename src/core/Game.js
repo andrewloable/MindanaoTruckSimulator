@@ -21,6 +21,7 @@ import { JobMarket } from '../ui/JobMarket.js';
 import { JobSystem } from '../systems/JobSystem.js';
 import { RadioSystem } from '../systems/RadioSystem.js';
 import { RadioWidget } from '../ui/RadioWidget.js';
+import { Garage } from '../ui/Garage.js';
 import { Truck, TruckTypes } from '../vehicles/Truck.js';
 import { Trailer, TrailerTypes } from '../vehicles/Trailer.js';
 import * as EnvironmentProps from '../world/EnvironmentProps.js';
@@ -51,6 +52,7 @@ export class Game {
     this.jobSystem = null;
     this.radioSystem = null;
     this.radioWidget = null;
+    this.garage = null;
 
     // Game state
     this.gameState = 'menu'; // menu, playing, paused
@@ -233,6 +235,11 @@ export class Game {
         this.radioSystem.prevStation();
       }
     });
+
+    // Toggle garage
+    this.input.onAction(InputAction.TOGGLE_GARAGE, () => {
+      this.toggleGarage();
+    });
   }
 
   /**
@@ -296,6 +303,18 @@ export class Game {
     // Create Radio Widget
     this.radioWidget = new RadioWidget(this.ui, this.radioSystem);
     this.radioWidget.init();
+
+    // Create Garage
+    this.garage = new Garage(this.ui);
+    this.garage.init();
+    this.garage.updateBalance(this.playerMoney);
+    this.garage.onPurchase = (truckId, price) => {
+      this.playerMoney -= price;
+      this.hud.updateMoney(this.playerMoney);
+    };
+    this.garage.onSelectTruck = (truckId) => {
+      this.changeTruck(truckId);
+    };
 
     // Show main menu initially
     this.mainMenu.show();
@@ -415,6 +434,45 @@ export class Game {
     }
 
     this.jobMarket.show();
+  }
+
+  /**
+   * Toggle garage screen
+   */
+  toggleGarage() {
+    if (this.gameState !== 'playing') return;
+
+    // Update balance before showing
+    this.garage.updateBalance(this.playerMoney);
+    this.garage.toggle();
+  }
+
+  /**
+   * Change the player's truck
+   * @param {string} truckId - ID of the truck type
+   */
+  changeTruck(truckId) {
+    const truckType = Object.values(TruckTypes).find(t => t.id === truckId);
+    if (!truckType) return;
+
+    // Remove old truck from scene
+    if (this.truck) {
+      this.scene.remove(this.truck.getObject3D());
+      this.truck.dispose();
+    }
+
+    // Create new truck
+    this.truck = new Truck(truckType);
+    this.testTruck = this.truck.getObject3D();
+    this.scene.add(this.testTruck);
+
+    // Position at current physics body position if exists
+    if (this.truckBody) {
+      this.testTruck.position.copy(this.truckBody.position);
+      this.testTruck.quaternion.copy(this.truckBody.quaternion);
+    }
+
+    console.log(`Changed to truck: ${truckType.name}`);
   }
 
   /**

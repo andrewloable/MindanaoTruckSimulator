@@ -7,5 +7,16 @@ compatibility_date = "2025-01-02"
 # Pages-specific configuration
 pages_build_output_dir = "dist"
 
-# Custom domain (configured in Cloudflare dashboard)
+# Custom domain configuration
 # Domain: mindanao-truck-simulator.repetitive.games
+#
+# DNS Setup (in domain registrar or Cloudflare DNS):
+# 1. Add CNAME record:
+#    - Name: mindanao-truck-simulator
+#    - Target: mindanao-truck-simulator.pages.dev
+#    - Proxy: Enabled (orange cloud)
+#
+# 2. In Cloudflare Pages dashboard:
+#    - Go to project > Custom domains
+#    - Add custom domain: mindanao-truck-simulator.repetitive.games
+#    - Cloudflare will verify DNS and provision SSL

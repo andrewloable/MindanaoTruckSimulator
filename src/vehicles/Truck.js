@@ -1,10 +1,18 @@
 /**
  * Truck - Low-poly truck model with physics
  *
- * Creates a detailed truck mesh with cabin, chassis, wheels, and lights.
+ * Loads GLB models from Kenney's Toy Car Kit (CC0 License)
  */
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// GLB model paths
+const TruckModels = {
+  standard: '/models/vehicles/vehicle-truck.glb',
+  heavy: '/models/vehicles/vehicle-monster-truck.glb',
+  fast: '/models/vehicles/vehicle-racer.glb',
+};
 
 // Truck configurations
 export const TruckTypes = {
@@ -13,7 +21,9 @@ export const TruckTypes = {
     name: 'Mindanao Hauler',
     description: 'Reliable workhorse for any cargo',
     price: 0, // Starting truck
-    cabinColor: 0x4CAF50, // Brand green
+    model: TruckModels.standard,
+    scale: 2.5,
+    color: 0x4CAF50, // Brand green
     specs: {
       mass: 8000,
       enginePower: 350, // HP
@@ -27,7 +37,9 @@ export const TruckTypes = {
     name: 'Davao Titan',
     description: 'Heavy-duty truck for maximum cargo',
     price: 150000,
-    cabinColor: 0x1565C0, // Blue
+    model: TruckModels.heavy,
+    scale: 2.0,
+    color: 0x1565C0, // Blue
     specs: {
       mass: 12000,
       enginePower: 450,
@@ -41,7 +53,9 @@ export const TruckTypes = {
     name: 'Island Express',
     description: 'Fast delivery truck for time-sensitive cargo',
     price: 200000,
-    cabinColor: 0xD32F2F, // Red
+    model: TruckModels.fast,
+    scale: 2.2,
+    color: 0xD32F2F, // Red
     specs: {
       mass: 6000,
       enginePower: 400,
@@ -52,25 +66,24 @@ export const TruckTypes = {
   },
 };
 
+// Shared GLTFLoader instance
+const gltfLoader = new GLTFLoader();
+
 export class Truck {
   constructor(type = TruckTypes.STANDARD) {
     this.type = type;
     this.group = new THREE.Group();
     this.group.name = `truck_${type.id}`;
 
-    // Components
-    this.cabin = null;
-    this.chassis = null;
+    // Model reference
+    this.model = null;
     this.wheels = [];
-    this.headlights = [];
-    this.taillights = [];
-    this.mirrors = [];
+    this.loaded = false;
+    this.onLoadCallback = null;
 
     // State
     this.headlightsOn = false;
     this.brakeLightsOn = false;
-    this.turnSignalLeft = false;
-    this.turnSignalRight = false;
 
     // Physics body reference (set externally)
     this.physicsBody = null;
@@ -80,361 +93,165 @@ export class Truck {
   }
 
   /**
-   * Build the truck model
+   * Build the truck by loading GLB model
    */
   build() {
-    this.createChassis();
-    this.createCabin();
-    this.createWheels();
-    this.createLights();
-    this.createDetails();
+    this.loadModel();
   }
 
   /**
-   * Create the truck chassis/frame
+   * Load GLB model
    */
-  createChassis() {
-    const chassisMaterial = new THREE.MeshStandardMaterial({
-      color: 0x333333,
-      roughness: 0.8,
-      metalness: 0.3,
-    });
+  loadModel() {
+    gltfLoader.load(
+      this.type.model,
+      (gltf) => {
+        this.model = gltf.scene;
 
-    // Main frame rails (two parallel beams)
-    const railGeometry = new THREE.BoxGeometry(0.15, 0.2, 8);
+        // Apply scale
+        const scale = this.type.scale;
+        this.model.scale.set(scale, scale, scale);
 
-    const leftRail = new THREE.Mesh(railGeometry, chassisMaterial);
-    leftRail.position.set(-0.5, 0.4, -1);
-    leftRail.castShadow = true;
-    this.group.add(leftRail);
+        // Rotate to face forward (Z+ direction)
+        this.model.rotation.y = Math.PI;
 
-    const rightRail = new THREE.Mesh(railGeometry, chassisMaterial);
-    rightRail.position.set(0.5, 0.4, -1);
-    rightRail.castShadow = true;
-    this.group.add(rightRail);
+        // Position adjustment - center and lift
+        this.model.position.y = 0.0;
 
-    // Cross members
-    const crossGeometry = new THREE.BoxGeometry(1.2, 0.1, 0.15);
-    for (let z = 2; z >= -4; z -= 1.5) {
-      const cross = new THREE.Mesh(crossGeometry, chassisMaterial);
-      cross.position.set(0, 0.35, z);
-      this.group.add(cross);
-    }
+        // Apply custom color to body parts
+        this.applyColor(this.type.color);
 
-    // Fuel tanks (cylindrical, on sides)
-    const tankGeometry = new THREE.CylinderGeometry(0.25, 0.25, 1.5, 12);
-    const tankMaterial = new THREE.MeshStandardMaterial({
-      color: 0x666666,
-      roughness: 0.6,
-      metalness: 0.4,
-    });
+        // Enable shadows
+        this.model.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
 
-    const leftTank = new THREE.Mesh(tankGeometry, tankMaterial);
-    leftTank.rotation.z = Math.PI / 2;
-    leftTank.position.set(-0.9, 0.5, -1);
-    leftTank.castShadow = true;
-    this.group.add(leftTank);
+        // Find wheel meshes for rotation
+        this.findWheels();
 
-    const rightTank = new THREE.Mesh(tankGeometry, tankMaterial);
-    rightTank.rotation.z = Math.PI / 2;
-    rightTank.position.set(0.9, 0.5, -1);
-    rightTank.castShadow = true;
-    this.group.add(rightTank);
-  }
+        this.group.add(this.model);
+        this.loaded = true;
 
-  /**
-   * Create the cabin
-   */
-  createCabin() {
-    const cabinMaterial = new THREE.MeshStandardMaterial({
-      color: this.type.cabinColor,
-      roughness: 0.4,
-      metalness: 0.3,
-    });
-
-    const glassMaterial = new THREE.MeshStandardMaterial({
-      color: 0x87CEEB,
-      roughness: 0.1,
-      metalness: 0.8,
-      transparent: true,
-      opacity: 0.6,
-    });
-
-    // Main cabin body
-    const cabinGeometry = new THREE.BoxGeometry(2.2, 1.8, 2.2);
-    this.cabin = new THREE.Mesh(cabinGeometry, cabinMaterial);
-    this.cabin.position.set(0, 1.5, 1.8);
-    this.cabin.castShadow = true;
-    this.cabin.receiveShadow = true;
-    this.group.add(this.cabin);
-
-    // Cabin roof (slightly larger)
-    const roofGeometry = new THREE.BoxGeometry(2.3, 0.15, 2.3);
-    const roof = new THREE.Mesh(roofGeometry, cabinMaterial);
-    roof.position.set(0, 2.45, 1.8);
-    roof.castShadow = true;
-    this.group.add(roof);
-
-    // Windshield
-    const windshieldGeometry = new THREE.PlaneGeometry(1.8, 1.2);
-    const windshield = new THREE.Mesh(windshieldGeometry, glassMaterial);
-    windshield.position.set(0, 1.8, 2.91);
-    windshield.rotation.x = -0.1;
-    this.group.add(windshield);
-
-    // Side windows
-    const sideWindowGeometry = new THREE.PlaneGeometry(1.5, 0.8);
-
-    const leftWindow = new THREE.Mesh(sideWindowGeometry, glassMaterial);
-    leftWindow.position.set(-1.11, 1.9, 1.8);
-    leftWindow.rotation.y = Math.PI / 2;
-    this.group.add(leftWindow);
-
-    const rightWindow = new THREE.Mesh(sideWindowGeometry, glassMaterial);
-    rightWindow.position.set(1.11, 1.9, 1.8);
-    rightWindow.rotation.y = -Math.PI / 2;
-    this.group.add(rightWindow);
-
-    // Hood/engine cover
-    const hoodGeometry = new THREE.BoxGeometry(2.0, 0.8, 1.2);
-    const hood = new THREE.Mesh(hoodGeometry, cabinMaterial);
-    hood.position.set(0, 0.9, 3.3);
-    hood.castShadow = true;
-    this.group.add(hood);
-
-    // Grille
-    const grilleMaterial = new THREE.MeshStandardMaterial({
-      color: 0x222222,
-      roughness: 0.9,
-      metalness: 0.1,
-    });
-    const grilleGeometry = new THREE.BoxGeometry(1.6, 0.6, 0.1);
-    const grille = new THREE.Mesh(grilleGeometry, grilleMaterial);
-    grille.position.set(0, 0.9, 3.91);
-    this.group.add(grille);
-
-    // Bumper
-    const bumperMaterial = new THREE.MeshStandardMaterial({
-      color: 0x444444,
-      roughness: 0.7,
-      metalness: 0.2,
-    });
-    const bumperGeometry = new THREE.BoxGeometry(2.4, 0.25, 0.15);
-    const bumper = new THREE.Mesh(bumperGeometry, bumperMaterial);
-    bumper.position.set(0, 0.45, 4.0);
-    this.group.add(bumper);
-  }
-
-  /**
-   * Create wheels with hub detail
-   */
-  createWheels() {
-    const tireMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1a1a1a,
-      roughness: 0.9,
-      metalness: 0.0,
-    });
-
-    const hubMaterial = new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      roughness: 0.4,
-      metalness: 0.6,
-    });
-
-    // Wheel positions: [x, y, z, isFront, isDouble]
-    const wheelPositions = [
-      { x: -1.0, y: 0.45, z: 3.0, front: true, double: false },  // Front left
-      { x: 1.0, y: 0.45, z: 3.0, front: true, double: false },   // Front right
-      { x: -1.0, y: 0.45, z: -0.5, front: false, double: true }, // Rear left 1
-      { x: 1.0, y: 0.45, z: -0.5, front: false, double: true },  // Rear right 1
-      { x: -1.0, y: 0.45, z: -2.0, front: false, double: true }, // Rear left 2
-      { x: 1.0, y: 0.45, z: -2.0, front: false, double: true },  // Rear right 2
-    ];
-
-    for (const pos of wheelPositions) {
-      const wheelGroup = new THREE.Group();
-
-      if (pos.double) {
-        // Dual wheels for rear axles
-        this.createWheel(wheelGroup, tireMaterial, hubMaterial, -0.15, pos.x < 0);
-        this.createWheel(wheelGroup, tireMaterial, hubMaterial, 0.15, pos.x < 0);
-      } else {
-        // Single wheel for front
-        this.createWheel(wheelGroup, tireMaterial, hubMaterial, 0, pos.x < 0);
+        if (this.onLoadCallback) {
+          this.onLoadCallback(this);
+        }
+      },
+      undefined,
+      (error) => {
+        console.error('Error loading truck model:', error);
+        // Fallback to simple box
+        this.createFallbackModel();
       }
-
-      wheelGroup.position.set(pos.x, pos.y, pos.z);
-      wheelGroup.userData = { isFront: pos.front };
-      this.wheels.push(wheelGroup);
-      this.group.add(wheelGroup);
-    }
+    );
   }
 
   /**
-   * Create a single wheel
+   * Apply color to the truck body
    */
-  createWheel(parent, tireMaterial, hubMaterial, offsetX, flipHub) {
-    // Tire
-    const tireGeometry = new THREE.CylinderGeometry(0.45, 0.45, 0.3, 16);
-    const tire = new THREE.Mesh(tireGeometry, tireMaterial);
-    tire.rotation.z = Math.PI / 2;
-    tire.position.x = offsetX;
-    tire.castShadow = true;
-    parent.add(tire);
+  applyColor(color) {
+    if (!this.model) return;
 
-    // Hub
-    const hubGeometry = new THREE.CylinderGeometry(0.2, 0.2, 0.32, 8);
-    const hub = new THREE.Mesh(hubGeometry, hubMaterial);
-    hub.rotation.z = Math.PI / 2;
-    hub.position.x = offsetX + (flipHub ? -0.01 : 0.01);
-    parent.add(hub);
+    this.model.traverse((child) => {
+      if (child.isMesh && child.material) {
+        // Clone material to avoid affecting other instances
+        if (Array.isArray(child.material)) {
+          child.material = child.material.map(m => m.clone());
+        } else {
+          child.material = child.material.clone();
+        }
 
-    // Lug nuts
-    const lugGeometry = new THREE.CylinderGeometry(0.03, 0.03, 0.05, 6);
-    for (let i = 0; i < 6; i++) {
-      const angle = (i / 6) * Math.PI * 2;
-      const lug = new THREE.Mesh(lugGeometry, hubMaterial);
-      lug.rotation.z = Math.PI / 2;
-      lug.position.set(
-        offsetX + (flipHub ? -0.16 : 0.16),
-        Math.sin(angle) * 0.12,
-        Math.cos(angle) * 0.12
-      );
-      parent.add(lug);
-    }
+        // Apply color to non-black, non-gray materials (likely body panels)
+        const mat = Array.isArray(child.material) ? child.material[0] : child.material;
+        if (mat.color) {
+          const hsl = {};
+          mat.color.getHSL(hsl);
+          // Only recolor if it's a colored part (not too dark or too light)
+          if (hsl.s > 0.2 && hsl.l > 0.2 && hsl.l < 0.8) {
+            mat.color.setHex(color);
+          }
+        }
+      }
+    });
   }
 
   /**
-   * Create lights (headlights, taillights, turn signals)
+   * Find wheel meshes in the model for rotation
    */
-  createLights() {
-    // Headlights
-    const headlightGeometry = new THREE.CircleGeometry(0.12, 12);
-    const headlightMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffee,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
+  findWheels() {
+    if (!this.model) return;
+
+    this.model.traverse((child) => {
+      if (child.isMesh) {
+        const name = child.name.toLowerCase();
+        if (name.includes('wheel') || name.includes('tire')) {
+          this.wheels.push({
+            mesh: child,
+            isFront: name.includes('front') || name.includes('fl') || name.includes('fr'),
+          });
+        }
+      }
     });
-
-    const headlightPositions = [
-      { x: -0.7, y: 0.9, z: 3.92 },
-      { x: 0.7, y: 0.9, z: 3.92 },
-    ];
-
-    for (const pos of headlightPositions) {
-      const light = new THREE.Mesh(headlightGeometry, headlightMaterial.clone());
-      light.position.set(pos.x, pos.y, pos.z);
-      this.headlights.push(light);
-      this.group.add(light);
-    }
-
-    // Taillights
-    const taillightGeometry = new THREE.BoxGeometry(0.2, 0.15, 0.05);
-    const taillightMaterial = new THREE.MeshStandardMaterial({
-      color: 0x880000,
-      emissive: 0x220000,
-      emissiveIntensity: 0.3,
-    });
-
-    const taillightPositions = [
-      { x: -0.9, y: 0.7, z: -5.0 },
-      { x: 0.9, y: 0.7, z: -5.0 },
-    ];
-
-    for (const pos of taillightPositions) {
-      const light = new THREE.Mesh(taillightGeometry, taillightMaterial.clone());
-      light.position.set(pos.x, pos.y, pos.z);
-      this.taillights.push(light);
-      this.group.add(light);
-    }
   }
 
   /**
-   * Create additional details (mirrors, exhaust, etc.)
+   * Create fallback model if GLB fails to load
    */
-  createDetails() {
-    const metalMaterial = new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      roughness: 0.3,
-      metalness: 0.8,
+  createFallbackModel() {
+    const material = new THREE.MeshStandardMaterial({
+      color: this.type.color,
+      roughness: 0.6,
+      metalness: 0.3,
     });
 
-    // Side mirrors
-    const mirrorGeometry = new THREE.BoxGeometry(0.3, 0.2, 0.05);
-    const mirrorArmGeometry = new THREE.BoxGeometry(0.4, 0.05, 0.05);
+    // Simple box truck
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 1.5, 4),
+      material
+    );
+    body.position.y = 1;
+    body.castShadow = true;
+    this.group.add(body);
 
-    for (const side of [-1, 1]) {
-      const mirrorArm = new THREE.Mesh(mirrorArmGeometry, metalMaterial);
-      mirrorArm.position.set(side * 1.3, 2.0, 2.5);
-      this.group.add(mirrorArm);
+    // Cabin
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(2, 1, 1.5),
+      material
+    );
+    cabin.position.set(0, 2, 1);
+    cabin.castShadow = true;
+    this.group.add(cabin);
 
-      const mirror = new THREE.Mesh(mirrorGeometry, metalMaterial);
-      mirror.position.set(side * 1.5, 2.0, 2.5);
-      this.mirrors.push(mirror);
-      this.group.add(mirror);
+    this.loaded = true;
+    if (this.onLoadCallback) {
+      this.onLoadCallback(this);
     }
-
-    // Exhaust pipes
-    const exhaustGeometry = new THREE.CylinderGeometry(0.06, 0.06, 1.5, 8);
-    const exhaustMaterial = new THREE.MeshStandardMaterial({
-      color: 0x444444,
-      roughness: 0.5,
-      metalness: 0.5,
-    });
-
-    const exhaust = new THREE.Mesh(exhaustGeometry, exhaustMaterial);
-    exhaust.position.set(-1.0, 1.2, 0.5);
-    exhaust.castShadow = true;
-    this.group.add(exhaust);
-
-    // Exhaust tip
-    const tipGeometry = new THREE.CylinderGeometry(0.08, 0.06, 0.1, 8);
-    const tip = new THREE.Mesh(tipGeometry, metalMaterial);
-    tip.position.set(-1.0, 2.0, 0.5);
-    this.group.add(tip);
-
-    // Air horn on roof
-    const hornGeometry = new THREE.CylinderGeometry(0.05, 0.08, 0.3, 8);
-    const horn1 = new THREE.Mesh(hornGeometry, metalMaterial);
-    horn1.position.set(-0.3, 2.6, 1.8);
-    this.group.add(horn1);
-
-    const horn2 = new THREE.Mesh(hornGeometry, metalMaterial);
-    horn2.position.set(0.3, 2.6, 1.8);
-    this.group.add(horn2);
-
-    // Sun visor
-    const visorGeometry = new THREE.BoxGeometry(2.0, 0.1, 0.4);
-    const visorMaterial = new THREE.MeshStandardMaterial({
-      color: 0x222222,
-      roughness: 0.9,
-    });
-    const visor = new THREE.Mesh(visorGeometry, visorMaterial);
-    visor.position.set(0, 2.5, 2.9);
-    visor.rotation.x = -0.3;
-    this.group.add(visor);
   }
 
   /**
-   * Toggle headlights
+   * Set callback for when model loads
+   */
+  onLoad(callback) {
+    this.onLoadCallback = callback;
+    if (this.loaded) {
+      callback(this);
+    }
+  }
+
+  /**
+   * Toggle headlights (visual only - GLB models don't have emissive lights)
    */
   setHeadlights(on) {
     this.headlightsOn = on;
-    for (const light of this.headlights) {
-      light.material.emissive.setHex(on ? 0xffffcc : 0x000000);
-      light.material.emissiveIntensity = on ? 1.5 : 0;
-    }
   }
 
   /**
-   * Set brake lights
+   * Set brake lights (visual only - GLB models don't have emissive lights)
    */
   setBrakeLights(on) {
     this.brakeLightsOn = on;
-    for (const light of this.taillights) {
-      light.material.emissive.setHex(on ? 0xff0000 : 0x220000);
-      light.material.emissiveIntensity = on ? 1.0 : 0.3;
-    }
   }
 
   /**
@@ -443,16 +260,13 @@ export class Truck {
    * @param {number} deltaTime - Time delta
    */
   updateWheels(speed, deltaTime) {
-    const wheelRadius = 0.45;
+    const wheelRadius = 0.3 * this.type.scale; // Approximate wheel radius
     const rotationSpeed = speed / wheelRadius;
 
     for (const wheel of this.wheels) {
-      // Rotate all children (the actual wheel meshes)
-      wheel.children.forEach(child => {
-        if (child.geometry.type === 'CylinderGeometry') {
-          child.rotation.x += rotationSpeed * deltaTime;
-        }
-      });
+      if (wheel.mesh) {
+        wheel.mesh.rotation.x += rotationSpeed * deltaTime;
+      }
     }
   }
 
@@ -462,8 +276,8 @@ export class Truck {
    */
   setSteering(angle) {
     for (const wheel of this.wheels) {
-      if (wheel.userData.isFront) {
-        wheel.rotation.y = angle * 0.5; // Limit steering angle
+      if (wheel.isFront && wheel.mesh) {
+        wheel.mesh.rotation.y = angle * 0.5;
       }
     }
   }

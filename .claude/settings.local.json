@@ -12,7 +12,13 @@
       "Bash(npm install:*)",
       "Bash(npm run build:*)",
       "Bash(bd close:*)",
-      "Bash(bd sync:*)"
+      "Bash(bd sync:*)",
+      "Bash(node -e:*)",
+      "Bash(node scripts/osm-download.js:*)",
+      "Bash(node scripts/osm-process.js:*)",
+      "Bash(go build:*)",
+      "WebSearch",
+      "Bash(powershell -Command:*)"
     ]
   }
 }

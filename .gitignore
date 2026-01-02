@@ -42,3 +42,9 @@ data/raw/*.xml
 *.tmp
 *.temp
 .cache/
+
+# Compiled binaries
+*.exe
+
+# Reference assets (large files - not tracked)
+reference/

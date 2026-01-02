@@ -10,7 +10,7 @@
     "deploy": "npm run build && wrangler pages deploy dist",
     "deploy:preview": "npm run build && wrangler pages deploy dist --branch preview",
     "osm:download": "node scripts/osm-download.js",
-    "osm:process": "node scripts/osm-process.js"
+    "osm:process": "go run scripts/osm-process.go"
   },
   "keywords": [
     "truck-simulator",

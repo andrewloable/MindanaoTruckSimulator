@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mindanao Truck Simulator</title>
   <meta name="description" content="A web-based truck driving simulation game set in Mindanao, Philippines">
+  <link rel="canonical" href="https://mindanao-truck-simulator.repetitive.games/">
 
   <!-- Open Graph / Social Media -->
   <meta property="og:type" content="website">
@@ -97,6 +98,24 @@
       border-radius: 4px;
       transition: width 0.3s ease-out;
     }
+
+    #credits {
+      position: absolute;
+      bottom: 10px;
+      right: 15px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+      z-index: 10;
+    }
+
+    #credits a {
+      color: rgba(255, 255, 255, 0.6);
+      text-decoration: none;
+    }
+
+    #credits a:hover {
+      color: #4CAF50;
+    }
   </style>
 </head>
 <body>
@@ -115,6 +134,11 @@
 
     <!-- UI Overlay (managed by JavaScript) -->
     <div id="ui-overlay"></div>
+
+    <!-- Credits -->
+    <div id="credits">
+      3D Models by <a href="https://kenney.nl" target="_blank" rel="noopener">Kenney</a> (CC0)
+    </div>
   </div>
 
   <script type="module" src="/src/main.js"></script>
