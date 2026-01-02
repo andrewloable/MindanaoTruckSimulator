@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bd list:*)",
+      "Bash(bd create:*)",
+      "Bash(bd dep add:*)",
+      "Bash(bd ready:*)",
+      "Bash(bd stats:*)",
+      "Bash(bd show:*)",
+      "Bash(bd update:*)"
+    ]
+  }
+}
