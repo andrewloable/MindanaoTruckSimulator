@@ -1,0 +1,11 @@
+# Cloudflare Pages configuration for Mindanao Truck Simulator
+# https://developers.cloudflare.com/pages/configuration/wrangler-configuration/
+
+name = "mindanao-truck-simulator"
+compatibility_date = "2025-01-02"
+
+# Pages-specific configuration
+pages_build_output_dir = "dist"
+
+# Custom domain (configured in Cloudflare dashboard)
+# Domain: mindanao-truck-simulator.repetitive.games

@@ -30,24 +30,33 @@ npm run osm:process  # Process OSM data into game format
 ## Project Structure
 
 ```
-├── public/              # Static assets served as-is
+├── public/
+│   └── images/             # Branding assets
+│       ├── mts-logo.png    # Circular badge logo (loading, favicon, menu)
+│       └── mts-cover.png   # Wide banner (menu background, Open Graph)
 ├── src/
-│   ├── core/            # Game engine core (renderer, loop, input)
-│   ├── systems/         # Game systems (physics, audio, economy)
-│   ├── world/           # World generation and road rendering
-│   ├── ui/              # UI screens and HUD components
-│   ├── vehicles/        # Truck and trailer logic
-│   └── utils/           # Shared utilities
-├── scripts/             # Build-time tools
-│   ├── osm-download.js  # OSM data downloader
-│   └── osm-process.js   # OSM to game format converter
-├── data/
-│   ├── raw/             # Downloaded OSM files (.osm, .pbf)
-│   └── processed/       # Game-ready data (roads.json, pois.json, chunks/)
-├── images/              # Branding assets
-│   ├── mts-logo.png     # Circular badge logo
-│   └── mts-cover.png    # Wide banner for backgrounds
-└── assets/              # Game assets (models, textures, sounds)
+│   ├── core/               # Game engine core
+│   │   ├── Game.js         # Main game controller
+│   │   └── InputManager.js # Keyboard + gamepad input handling
+│   ├── systems/            # Game systems
+│   │   ├── PhysicsSystem.js  # Cannon.js physics wrapper
+│   │   └── AudioManager.js   # Web Audio API audio system
+│   ├── world/              # World generation and rendering
+│   │   └── SkySystem.js    # Procedural sky with time-of-day
+│   ├── ui/                 # UI components
+│   │   ├── UIManager.js    # Screen/overlay management
+│   │   ├── MainMenu.js     # Main menu screen
+│   │   ├── PauseMenu.js    # Pause menu screen
+│   │   └── HUD.js          # In-game HUD overlay
+│   ├── vehicles/           # Truck and trailer logic (planned)
+│   └── utils/              # Shared utilities (planned)
+├── scripts/                # Build-time tools (planned)
+│   ├── osm-download.js     # OSM data downloader
+│   └── osm-process.js      # OSM to game format converter
+├── data/                   # Map data (planned)
+│   ├── raw/                # Downloaded OSM files
+│   └── processed/          # Game-ready data
+└── assets/                 # Game assets (models, textures, sounds)
 ```
 
 ## Architecture

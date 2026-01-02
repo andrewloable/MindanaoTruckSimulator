@@ -1,0 +1,38 @@
+{
+  "name": "mindanao-truck-simulator",
+  "version": "0.1.0",
+  "description": "A web-based truck driving simulation game set in Mindanao, Philippines",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "npm run build && wrangler pages deploy dist",
+    "deploy:preview": "npm run build && wrangler pages deploy dist --branch preview",
+    "osm:download": "node scripts/osm-download.js",
+    "osm:process": "node scripts/osm-process.js"
+  },
+  "keywords": [
+    "truck-simulator",
+    "driving-game",
+    "three-js",
+    "webgl",
+    "mindanao",
+    "philippines"
+  ],
+  "author": "Loable Tech",
+  "license": "MIT",
+  "homepage": "https://mindanao-truck-simulator.repetitive.games",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/loabletech/MindanaoTruckSimulator"
+  },
+  "dependencies": {
+    "cannon-es": "^0.20.0",
+    "three": "^0.182.0"
+  },
+  "devDependencies": {
+    "vite": "^7.3.0",
+    "wrangler": "^4.54.0"
+  }
+}
