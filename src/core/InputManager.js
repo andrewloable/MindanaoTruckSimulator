@@ -16,6 +16,10 @@ export const InputAction = {
   CAMERA_NEXT: 'cameraNext',
   PAUSE: 'pause',
   TOGGLE_MAP: 'toggleMap',
+  TOGGLE_JOBS: 'toggleJobs',
+  RADIO_TOGGLE: 'radioToggle',
+  RADIO_NEXT: 'radioNext',
+  RADIO_PREV: 'radioPrev',
 };
 
 // Default gamepad button/axis mappings (standard gamepad layout)
@@ -88,6 +92,10 @@ const DEFAULT_KEY_BINDINGS = {
   'KeyC': InputAction.CAMERA_NEXT,
   'Escape': InputAction.PAUSE,
   'KeyM': InputAction.TOGGLE_MAP,
+  'KeyJ': InputAction.TOGGLE_JOBS,
+  'KeyR': InputAction.RADIO_TOGGLE,
+  'BracketRight': InputAction.RADIO_NEXT,
+  'BracketLeft': InputAction.RADIO_PREV,
 };
 
 export class InputManager {

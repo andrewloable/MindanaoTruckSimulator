@@ -8,12 +8,22 @@ import * as THREE from 'three';
 import { updateLoadingProgress, hideLoadingScreen } from '../main.js';
 import { InputManager, InputAction } from './InputManager.js';
 import { SkySystem } from '../world/SkySystem.js';
+import { RoadGenerator } from '../world/RoadGenerator.js';
 import { PhysicsSystem } from '../systems/PhysicsSystem.js';
 import { AudioManager, AudioCategory } from '../systems/AudioManager.js';
 import { UIManager } from '../ui/UIManager.js';
 import { MainMenu } from '../ui/MainMenu.js';
 import { PauseMenu } from '../ui/PauseMenu.js';
+import { OptionsMenu } from '../ui/OptionsMenu.js';
 import { HUD } from '../ui/HUD.js';
+import { MiniMap } from '../ui/MiniMap.js';
+import { JobMarket } from '../ui/JobMarket.js';
+import { JobSystem } from '../systems/JobSystem.js';
+import { RadioSystem } from '../systems/RadioSystem.js';
+import { RadioWidget } from '../ui/RadioWidget.js';
+import { Truck, TruckTypes } from '../vehicles/Truck.js';
+import { Trailer, TrailerTypes } from '../vehicles/Trailer.js';
+import * as EnvironmentProps from '../world/EnvironmentProps.js';
 
 export class Game {
   constructor() {
@@ -28,22 +38,31 @@ export class Game {
     // Game systems
     this.input = null;
     this.skySystem = null;
+    this.roadGenerator = null;
     this.physics = null;
     this.audio = null;
     this.ui = null;
     this.mainMenu = null;
     this.pauseMenu = null;
+    this.optionsMenu = null;
     this.hud = null;
+    this.miniMap = null;
+    this.jobMarket = null;
+    this.jobSystem = null;
+    this.radioSystem = null;
+    this.radioWidget = null;
 
     // Game state
     this.gameState = 'menu'; // menu, playing, paused
+    this.playerMoney = 5000; // Starting money (PHP)
 
-    // Test truck state
-    this.testTruck = null;
-    this.truckBody = null;
+    // Vehicle state
+    this.truck = null;        // Truck class instance
+    this.trailer = null;      // Trailer class instance
+    this.testTruck = null;    // Three.js group (for compatibility)
+    this.truckBody = null;    // Physics body
     this.truckSpeed = 0;
     this.headlightsOn = false;
-    this.headlights = [];
 
     // Camera settings
     this.cameraMode = 'chase'; // chase, cockpit, orbit
@@ -127,6 +146,12 @@ export class Game {
 
     updateLoadingProgress(70);
 
+    // Initialize road generator and try to load roads
+    this.roadGenerator = new RoadGenerator(this.scene, this.physics);
+    await this.loadRoads();
+
+    updateLoadingProgress(75);
+
     // Create audio manager (will be initialized on first user interaction)
     this.audio = new AudioManager();
 
@@ -184,6 +209,30 @@ export class Game {
     this.input.onAction(InputAction.TOGGLE_MAP, () => {
       console.log('Toggle minimap (not yet implemented)');
     });
+
+    // Toggle job market
+    this.input.onAction(InputAction.TOGGLE_JOBS, () => {
+      this.toggleJobMarket();
+    });
+
+    // Radio controls
+    this.input.onAction(InputAction.RADIO_TOGGLE, () => {
+      if (this.radioSystem) {
+        this.radioSystem.toggle();
+      }
+    });
+
+    this.input.onAction(InputAction.RADIO_NEXT, () => {
+      if (this.radioSystem) {
+        this.radioSystem.nextStation();
+      }
+    });
+
+    this.input.onAction(InputAction.RADIO_PREV, () => {
+      if (this.radioSystem) {
+        this.radioSystem.prevStation();
+      }
+    });
   }
 
   /**
@@ -194,12 +243,16 @@ export class Game {
     this.ui = new UIManager();
     this.ui.init();
 
+    // Create options menu (needed by main menu and pause menu)
+    this.optionsMenu = new OptionsMenu(this.ui, this.audio, this.input, {
+      onClose: () => this.closeOptions(),
+    });
+    this.optionsMenu.init();
+
     // Create main menu
     this.mainMenu = new MainMenu(this.ui, {
       onStart: () => this.startGame(),
-      onOptions: () => {
-        console.log('Options menu (not yet implemented)');
-      },
+      onOptions: () => this.showOptions('menu'),
       onAbout: () => {
         console.log('About screen (not yet implemented)');
       },
@@ -209,9 +262,7 @@ export class Game {
     // Create pause menu
     this.pauseMenu = new PauseMenu(this.ui, {
       onResume: () => this.resumeGame(),
-      onOptions: () => {
-        console.log('Options menu (not yet implemented)');
-      },
+      onOptions: () => this.showOptions('paused'),
       onMainMenu: () => this.returnToMainMenu(),
     });
     this.pauseMenu.init();
@@ -220,8 +271,84 @@ export class Game {
     this.hud = new HUD(this.ui);
     this.hud.init();
 
+    // Create MiniMap
+    this.miniMap = new MiniMap(this.ui);
+    this.miniMap.init();
+
+    // Create Job System
+    this.jobSystem = new JobSystem();
+    this.jobSystem.onJobCompleted = (job) => this.onJobCompleted(job);
+    this.jobSystem.onJobFailed = (job) => this.onJobFailed(job);
+
+    // Create Job Market
+    this.jobMarket = new JobMarket(this.ui, this.jobSystem, {
+      onJobAccepted: (job) => this.onJobAccepted(job),
+      onClose: () => {
+        // Resume game if it was paused for job market
+      },
+    });
+    this.jobMarket.init();
+
+    // Create Radio System
+    this.radioSystem = new RadioSystem(this.audio);
+    this.radioSystem.init();
+
+    // Create Radio Widget
+    this.radioWidget = new RadioWidget(this.ui, this.radioSystem);
+    this.radioWidget.init();
+
     // Show main menu initially
     this.mainMenu.show();
+  }
+
+  /**
+   * Show options menu
+   * @param {string} returnTo - Where to return after closing ('menu' or 'paused')
+   */
+  showOptions(returnTo) {
+    this.optionsReturnTo = returnTo;
+    this.optionsMenu.show();
+  }
+
+  /**
+   * Close options menu and return to previous screen
+   */
+  closeOptions() {
+    if (this.optionsReturnTo === 'menu') {
+      this.mainMenu.show();
+    } else if (this.optionsReturnTo === 'paused') {
+      this.pauseMenu.show();
+    }
+  }
+
+  /**
+   * Load road data if available
+   */
+  async loadRoads() {
+    try {
+      const roadsLoaded = await this.roadGenerator.loadRoads('/data/processed/roads.json');
+      if (roadsLoaded) {
+        this.roadGenerator.generateRoads();
+        await this.roadGenerator.loadPOIs('/data/processed/pois.json');
+        this.roadGenerator.createPOIMarkers();
+
+        // Pass road data to miniMap
+        if (this.miniMap) {
+          this.miniMap.setRoadData(
+            this.roadGenerator.roads,
+            this.roadGenerator.getBounds()
+          );
+          this.miniMap.setPOIData(this.roadGenerator.pois);
+        }
+
+        // Initialize job system with POI data
+        if (this.jobSystem) {
+          this.jobSystem.init(this.roadGenerator.pois);
+        }
+      }
+    } catch (error) {
+      console.log('No road data available yet. Run npm run osm:download && npm run osm:process');
+    }
   }
 
   /**
@@ -237,7 +364,10 @@ export class Game {
     this.isPaused = false;
     this.mainMenu.hide();
     this.hud.show();
-    console.log('Game started - WASD to drive!');
+    this.hud.setMoney(this.playerMoney);
+    this.miniMap.show();
+    this.radioWidget.show();
+    console.log('Game started - WASD to drive! Press J for Jobs, R for Radio');
   }
 
   /**
@@ -258,6 +388,8 @@ export class Game {
     this.isPaused = true;
     this.pauseMenu.hide();
     this.hud.hide();
+    this.miniMap.hide();
+    this.radioWidget.hide();
     this.mainMenu.show();
 
     // Reset truck position
@@ -268,6 +400,92 @@ export class Game {
       this.truckBody.quaternion.set(0, 0, 0, 1);
     }
     console.log('Returned to main menu');
+  }
+
+  /**
+   * Toggle job market screen
+   */
+  toggleJobMarket() {
+    if (this.gameState !== 'playing') return;
+
+    // Don't open if there's already an active job
+    if (this.jobSystem.activeJob) {
+      console.log('Complete current job before accepting a new one');
+      return;
+    }
+
+    this.jobMarket.show();
+  }
+
+  /**
+   * Called when a job is accepted
+   * @param {Object} job
+   */
+  onJobAccepted(job) {
+    console.log(`Job accepted: ${job.cargo.name} to ${job.destination.name}`);
+
+    // Set route on minimap
+    if (this.miniMap) {
+      this.miniMap.setRoute(
+        this.jobSystem.getRoutePoints(),
+        job.destination
+      );
+    }
+
+    // Update HUD with job info
+    if (this.hud) {
+      this.hud.setJobInfo(job);
+    }
+  }
+
+  /**
+   * Called when a job is completed
+   * @param {Object} job
+   */
+  onJobCompleted(job) {
+    console.log(`Job completed! Earned ₱${job.finalPayment}`);
+
+    // Add payment to player money
+    this.playerMoney += job.finalPayment;
+
+    // Clear route from minimap
+    if (this.miniMap) {
+      this.miniMap.clearRoute();
+    }
+
+    // Clear job info from HUD
+    if (this.hud) {
+      this.hud.clearJobInfo();
+      this.hud.setMoney(this.playerMoney);
+    }
+
+    // TODO: Show completion notification
+  }
+
+  /**
+   * Called when a job fails
+   * @param {Object} job
+   */
+  onJobFailed(job) {
+    console.log(`Job failed: ${job.failReason}`);
+
+    // Deduct penalty from player money
+    if (job.penalty) {
+      this.playerMoney = Math.max(0, this.playerMoney - job.penalty);
+    }
+
+    // Clear route from minimap
+    if (this.miniMap) {
+      this.miniMap.clearRoute();
+    }
+
+    // Clear job info from HUD
+    if (this.hud) {
+      this.hud.clearJobInfo();
+      this.hud.setMoney(this.playerMoney);
+    }
+
+    // TODO: Show failure notification
   }
 
   /**
@@ -322,101 +540,141 @@ export class Game {
     });
     const road = new THREE.Mesh(roadGeometry, roadMaterial);
     road.rotation.x = -Math.PI / 2;
-    road.position.y = 0.01; // Slightly above ground to avoid z-fighting
+    road.position.y = 0.01;
     road.receiveShadow = true;
     this.scene.add(road);
 
-    // Create truck group
-    this.testTruck = new THREE.Group();
-
-    // Truck body (cabin)
-    const cabinGeometry = new THREE.BoxGeometry(2.4, 2.2, 3);
-    const cabinMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4CAF50, // Brand green
+    // Road markings (center line)
+    const markingMaterial = new THREE.MeshStandardMaterial({
+      color: 0xFFFFFF,
       roughness: 0.5,
-      metalness: 0.3,
     });
-    const cabin = new THREE.Mesh(cabinGeometry, cabinMaterial);
-    cabin.position.set(0, 1.1, 1.5);
-    cabin.castShadow = true;
-    cabin.receiveShadow = true;
-    this.testTruck.add(cabin);
-
-    // Truck cargo area
-    const cargoGeometry = new THREE.BoxGeometry(2.5, 2.8, 6);
-    const cargoMaterial = new THREE.MeshStandardMaterial({
-      color: 0x666666,
-      roughness: 0.7,
-      metalness: 0.2,
-    });
-    const cargo = new THREE.Mesh(cargoGeometry, cargoMaterial);
-    cargo.position.set(0, 1.4, -2.5);
-    cargo.castShadow = true;
-    cargo.receiveShadow = true;
-    this.testTruck.add(cargo);
-
-    // Wheels (simple cylinders)
-    const wheelGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16);
-    const wheelMaterial = new THREE.MeshStandardMaterial({
-      color: 0x222222,
-      roughness: 0.9,
-    });
-
-    const wheelPositions = [
-      { x: -1.3, y: 0.5, z: 2 },   // Front left
-      { x: 1.3, y: 0.5, z: 2 },    // Front right
-      { x: -1.3, y: 0.5, z: -1.5 }, // Rear left 1
-      { x: 1.3, y: 0.5, z: -1.5 },  // Rear right 1
-      { x: -1.3, y: 0.5, z: -3.5 }, // Rear left 2
-      { x: 1.3, y: 0.5, z: -3.5 },  // Rear right 2
-    ];
-
-    for (const pos of wheelPositions) {
-      const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(pos.x, pos.y, pos.z);
-      wheel.castShadow = true;
-      this.testTruck.add(wheel);
+    for (let z = -95; z < 100; z += 8) {
+      const marking = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.2, 4),
+        markingMaterial
+      );
+      marking.rotation.x = -Math.PI / 2;
+      marking.position.set(0, 0.02, z);
+      this.scene.add(marking);
     }
 
-    // Headlights
-    const headlightGeometry = new THREE.CircleGeometry(0.2, 16);
-    const headlightMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffcc,
-      emissive: 0x000000,
-      emissiveIntensity: 0,
-    });
-
-    const leftHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial.clone());
-    leftHeadlight.position.set(-0.8, 1, 3.01);
-    this.testTruck.add(leftHeadlight);
-    this.headlights.push(leftHeadlight);
-
-    const rightHeadlight = new THREE.Mesh(headlightGeometry, headlightMaterial.clone());
-    rightHeadlight.position.set(0.8, 1, 3.01);
-    this.testTruck.add(rightHeadlight);
-    this.headlights.push(rightHeadlight);
-
-    // Position truck
-    this.testTruck.position.set(0, 1.5, 0);
+    // Create truck using new Truck class
+    this.truck = new Truck(TruckTypes.STANDARD);
+    this.testTruck = this.truck.getObject3D();
+    this.testTruck.position.set(0, 0, 0);
     this.scene.add(this.testTruck);
 
     // Create physics body for truck
+    const specs = this.truck.getSpecs();
     this.truckBody = this.physics.createVehicle(this.testTruck, {
-      mass: 2000,
+      mass: specs.mass,
       width: 2.5,
       height: 2.5,
       length: 9,
     });
+
+    // Add environment props
+    this.addEnvironmentProps();
+  }
+
+  /**
+   * Add environment props to the scene
+   */
+  addEnvironmentProps() {
+    // Palm trees along the road
+    for (let z = -90; z < 100; z += 15) {
+      // Left side
+      const leftTree = EnvironmentProps.createPalmTree(8 + Math.random() * 4);
+      leftTree.position.set(-8 - Math.random() * 5, 0, z + Math.random() * 5);
+      leftTree.rotation.y = Math.random() * Math.PI * 2;
+      this.scene.add(leftTree);
+
+      // Right side
+      const rightTree = EnvironmentProps.createPalmTree(8 + Math.random() * 4);
+      rightTree.position.set(8 + Math.random() * 5, 0, z + Math.random() * 5);
+      rightTree.rotation.y = Math.random() * Math.PI * 2;
+      this.scene.add(rightTree);
+    }
+
+    // Bushes
+    for (let i = 0; i < 20; i++) {
+      const bush = EnvironmentProps.createBush();
+      const side = Math.random() > 0.5 ? 1 : -1;
+      bush.position.set(
+        side * (6 + Math.random() * 15),
+        0,
+        -80 + Math.random() * 160
+      );
+      this.scene.add(bush);
+    }
+
+    // Buildings in the distance
+    const building1 = EnvironmentProps.createBuilding({
+      width: 10,
+      depth: 12,
+      height: 8,
+      floors: 2,
+      color: 0xE8E8E8,
+      hasBalcony: true,
+    });
+    building1.position.set(-30, 0, 50);
+    building1.rotation.y = 0.3;
+    this.scene.add(building1);
+
+    const building2 = EnvironmentProps.createBuilding({
+      width: 8,
+      depth: 8,
+      height: 5,
+      floors: 1,
+      color: 0xFFF8E1,
+    });
+    building2.position.set(25, 0, -40);
+    building2.rotation.y = -0.2;
+    this.scene.add(building2);
+
+    // Warehouse
+    const warehouse = EnvironmentProps.createWarehouse();
+    warehouse.position.set(-40, 0, -60);
+    warehouse.rotation.y = 0.1;
+    this.scene.add(warehouse);
+
+    // Gas station
+    const gasStation = EnvironmentProps.createGasStation();
+    gasStation.position.set(20, 0, 30);
+    gasStation.rotation.y = Math.PI / 2;
+    this.scene.add(gasStation);
+
+    // Street lamps
+    for (let z = -80; z < 90; z += 25) {
+      const leftLamp = EnvironmentProps.createStreetLamp();
+      leftLamp.position.set(-6, 0, z);
+      leftLamp.rotation.y = Math.PI / 2;
+      this.scene.add(leftLamp);
+
+      const rightLamp = EnvironmentProps.createStreetLamp();
+      rightLamp.position.set(6, 0, z);
+      rightLamp.rotation.y = -Math.PI / 2;
+      this.scene.add(rightLamp);
+    }
+
+    // Road signs
+    const speedSign = EnvironmentProps.createRoadSign('60', 'speed');
+    speedSign.position.set(-5.5, 0, 70);
+    this.scene.add(speedSign);
+
+    const citySign = EnvironmentProps.createRoadSign('Davao City', 'city');
+    citySign.position.set(5.5, 0, -70);
+    citySign.rotation.y = Math.PI;
+    this.scene.add(citySign);
   }
 
   /**
    * Update headlight visuals
    */
   updateHeadlights() {
-    for (const light of this.headlights) {
-      light.material.emissive.setHex(this.headlightsOn ? 0xffffcc : 0x000000);
-      light.material.emissiveIntensity = this.headlightsOn ? 1 : 0;
+    if (this.truck) {
+      this.truck.setHeadlights(this.headlightsOn);
     }
   }
 
@@ -548,8 +806,36 @@ export class Game {
     // Update physics simulation
     this.physics.update(deltaTime);
 
+    // Update job system
+    if (this.jobSystem && this.testTruck) {
+      this.jobSystem.update(
+        this.testTruck.position.x,
+        this.testTruck.position.z,
+        deltaTime
+      );
+
+      // Update HUD job distance
+      if (this.jobSystem.activeJob && this.hud) {
+        const dist = this.jobSystem.getDistanceToDestination(
+          this.testTruck.position.x,
+          this.testTruck.position.z
+        );
+        this.hud.updateJobDistance(dist);
+      }
+    }
+
     // Update camera
     this.updateCamera(deltaTime);
+
+    // Update radio system
+    if (this.radioSystem) {
+      this.radioSystem.update(deltaTime);
+    }
+
+    // Update radio widget
+    if (this.radioWidget) {
+      this.radioWidget.update();
+    }
 
     // Update HUD
     this.updateHUD();
@@ -567,6 +853,21 @@ export class Game {
     // Update time from sky system
     if (this.skySystem) {
       this.hud.setTime(this.skySystem.timeOfDay);
+    }
+
+    // Update GPS location from truck position
+    if (this.testTruck) {
+      this.hud.setLocation(this.testTruck.position.x, this.testTruck.position.z);
+
+      // Update minimap
+      if (this.miniMap) {
+        this.miniMap.setPlayerPosition(
+          this.testTruck.position.x,
+          this.testTruck.position.z,
+          this.testTruck.rotation.y
+        );
+        this.miniMap.render();
+      }
     }
   }
 

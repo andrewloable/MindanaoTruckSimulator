@@ -40,6 +40,15 @@ The primary goal is to create a relaxing and engaging game that allows players t
 A CLI tool to download OpenStreetMaps road data for Mindanao:
 - **Data Source:** Overpass API or Geofabrik regional extracts for Philippines/Mindanao
 - **Geographic Bounds:** Mindanao island bounding box (approximately 5.5°N to 9.8°N, 121.9°E to 126.6°E)
+- **Downloadable Regions:** Support downloading individual regions or full island:
+    - `mindanao` - Full Mindanao island
+    - `zamboanga` - Zamboanga Peninsula (Region IX)
+    - `northern` - Northern Mindanao (Region X) - includes Cagayan de Oro
+    - `davao` - Davao Region (Region XI) - includes Davao City
+    - `soccsksargen` - SOCCSKSARGEN (Region XII) - includes General Santos
+    - `caraga` - Caraga Region (Region XIII) - includes Butuan
+    - `barmm` - Bangsamoro (BARMM) - includes Cotabato City
+    - `test` - Small test area for development
 - **Road Types to Extract:**
     - `highway=motorway` / `highway=trunk` (major highways)
     - `highway=primary` (primary roads)
@@ -191,6 +200,7 @@ Support for game input devices via the Web Gamepad API:
 - **In-Game HUD (Heads-Up Display):**
     - Speedometer.
     - Mini-map / GPS route display.
+    - GPS location display showing current position (lat/lon coordinates and/or city/region name).
     - Fuel gauge.
     - Current cargo and destination information.
     - In-game time and currency balance.
