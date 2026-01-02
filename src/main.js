@@ -8,6 +8,9 @@
 import * as THREE from 'three';
 import { Game } from './core/Game.js';
 
+// Design system
+import './styles/design-tokens.css';
+
 // Wait for DOM to be ready
 document.addEventListener('DOMContentLoaded', () => {
   // Initialize the game

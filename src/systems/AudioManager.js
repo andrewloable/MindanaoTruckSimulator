@@ -398,6 +398,7 @@ export const GameSounds = {
   // Engine
   ENGINE_IDLE: 'engine_idle',
   ENGINE_REV: 'engine_rev',
+  ENGINE_START: 'engine_start',
 
   // Vehicle
   HORN: 'horn',
@@ -416,3 +417,34 @@ export const GameSounds = {
   NOTIFICATION: 'notification',
   MONEY: 'money',
 };
+
+// Sound file paths
+export const SoundFiles = {
+  [GameSounds.ENGINE_IDLE]: '/audio/engine-6000.mp3',
+  [GameSounds.ENGINE_REV]: '/audio/engine-47745.mp3',
+  [GameSounds.ENGINE_START]: '/audio/engine-start-86242.mp3',
+};
+
+/**
+ * Load all essential game sounds
+ * @param {AudioManager} audioManager
+ * @returns {Promise<void>}
+ */
+export async function loadGameSounds(audioManager) {
+  if (!audioManager.isInitialized()) {
+    await audioManager.init();
+  }
+
+  const loadPromises = [];
+
+  for (const [id, path] of Object.entries(SoundFiles)) {
+    loadPromises.push(
+      audioManager.loadSound(id, path).catch(err => {
+        console.warn(`Failed to load ${id}:`, err);
+      })
+    );
+  }
+
+  await Promise.all(loadPromises);
+  console.log('Game sounds loaded');
+}

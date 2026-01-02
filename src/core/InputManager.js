@@ -2,7 +2,17 @@
  * InputManager - Handles all input from keyboard, gamepad, and mouse
  *
  * Provides a unified input system that can be queried by game systems.
+ * Includes force feedback support for racing wheels and gamepads.
  */
+
+// Force feedback effect types
+export const FFBEffect = {
+  ENGINE_RUMBLE: 'engineRumble',
+  ROAD_SURFACE: 'roadSurface',
+  COLLISION: 'collision',
+  BRAKE: 'brake',
+  STEERING_RESISTANCE: 'steeringResistance',
+};
 
 // Input action names
 export const InputAction = {
@@ -139,6 +149,13 @@ export class InputManager {
     this.gamepadButtonStates = new Map();
     this.gamepadJustPressed = new Set();
 
+    // Force feedback state
+    this.ffbEnabled = true;
+    this.ffbIntensity = 1.0; // 0-1 master intensity
+    this.vibrationActuator = null;
+    this.currentVibration = { weak: 0, strong: 0 };
+    this.activeEffects = new Map(); // Track active continuous effects
+
     // Initialize action states
     for (const action of Object.values(InputAction)) {
       this.actionStates.set(action, false);
@@ -186,6 +203,32 @@ export class InputManager {
     console.log(`Gamepad connected: ${event.gamepad.id} (index ${event.gamepad.index})`);
     this.activeGamepadIndex = event.gamepad.index;
     this.gamepadConnected = true;
+
+    // Check for vibration actuator (force feedback support)
+    this._initVibrationActuator(event.gamepad);
+  }
+
+  /**
+   * Initialize vibration actuator for force feedback
+   * @param {Gamepad} gamepad
+   */
+  _initVibrationActuator(gamepad) {
+    // Check for vibrationActuator (standard)
+    if (gamepad.vibrationActuator) {
+      this.vibrationActuator = gamepad.vibrationActuator;
+      console.log('Force feedback available (vibrationActuator)');
+      return;
+    }
+
+    // Check for hapticActuators (older spec)
+    if (gamepad.hapticActuators && gamepad.hapticActuators.length > 0) {
+      this.vibrationActuator = gamepad.hapticActuators[0];
+      console.log('Force feedback available (hapticActuators)');
+      return;
+    }
+
+    console.log('No force feedback support detected');
+    this.vibrationActuator = null;
   }
 
   /**
@@ -602,6 +645,215 @@ export class InputManager {
       localStorage.setItem('mts_keybindings', JSON.stringify(this.keyBindings));
     } catch (e) {
       console.warn('Failed to save key bindings:', e);
+    }
+  }
+
+  // ========== FORCE FEEDBACK METHODS ==========
+
+  /**
+   * Check if force feedback is supported
+   * @returns {boolean}
+   */
+  hasForceFeedback() {
+    return this.vibrationActuator !== null;
+  }
+
+  /**
+   * Enable or disable force feedback
+   * @param {boolean} enabled
+   */
+  setForceFeedbackEnabled(enabled) {
+    this.ffbEnabled = enabled;
+    if (!enabled) {
+      this.stopAllVibration();
+    }
+  }
+
+  /**
+   * Set force feedback intensity
+   * @param {number} intensity - 0 to 1
+   */
+  setForceFeedbackIntensity(intensity) {
+    this.ffbIntensity = Math.max(0, Math.min(1, intensity));
+  }
+
+  /**
+   * Play a vibration effect
+   * @param {number} weakMagnitude - Weak motor (0-1), good for subtle effects
+   * @param {number} strongMagnitude - Strong motor (0-1), good for impacts
+   * @param {number} duration - Duration in milliseconds
+   */
+  async playVibration(weakMagnitude, strongMagnitude, duration = 100) {
+    if (!this.ffbEnabled || !this.vibrationActuator) return;
+
+    const weak = weakMagnitude * this.ffbIntensity;
+    const strong = strongMagnitude * this.ffbIntensity;
+
+    try {
+      // Standard Gamepad API vibration
+      if (this.vibrationActuator.playEffect) {
+        await this.vibrationActuator.playEffect('dual-rumble', {
+          startDelay: 0,
+          duration: duration,
+          weakMagnitude: weak,
+          strongMagnitude: strong,
+        });
+      } else if (this.vibrationActuator.pulse) {
+        // Older haptic actuator API
+        await this.vibrationActuator.pulse(Math.max(weak, strong), duration);
+      }
+    } catch (e) {
+      // Vibration may fail silently on some browsers
+    }
+  }
+
+  /**
+   * Stop all vibration
+   */
+  async stopAllVibration() {
+    if (!this.vibrationActuator) return;
+
+    try {
+      if (this.vibrationActuator.reset) {
+        await this.vibrationActuator.reset();
+      } else {
+        await this.playVibration(0, 0, 10);
+      }
+    } catch (e) {
+      // Ignore errors
+    }
+
+    this.activeEffects.clear();
+    this.currentVibration = { weak: 0, strong: 0 };
+  }
+
+  /**
+   * Play engine rumble effect (continuous, based on RPM)
+   * @param {number} rpm - Engine RPM (0-8000 typical range)
+   * @param {number} maxRpm - Maximum RPM
+   */
+  playEngineRumble(rpm, maxRpm = 6000) {
+    if (!this.ffbEnabled || !this.vibrationActuator) return;
+
+    const rpmRatio = Math.min(1, rpm / maxRpm);
+    // Low frequency rumble that increases with RPM
+    const weak = 0.1 + rpmRatio * 0.2;
+    const strong = rpmRatio * 0.15;
+
+    this.activeEffects.set(FFBEffect.ENGINE_RUMBLE, { weak, strong });
+    this._updateContinuousVibration();
+  }
+
+  /**
+   * Play road surface effect (varies by surface type)
+   * @param {string} surface - 'asphalt', 'gravel', 'dirt', 'cobblestone'
+   * @param {number} speed - Current speed in km/h
+   */
+  playRoadSurface(surface, speed) {
+    if (!this.ffbEnabled || !this.vibrationActuator) return;
+
+    const speedFactor = Math.min(1, speed / 80);
+    let weak = 0, strong = 0;
+
+    switch (surface) {
+      case 'asphalt':
+        weak = 0.02 * speedFactor;
+        strong = 0;
+        break;
+      case 'gravel':
+        weak = 0.3 * speedFactor;
+        strong = 0.1 * speedFactor;
+        break;
+      case 'dirt':
+        weak = 0.2 * speedFactor;
+        strong = 0.15 * speedFactor;
+        break;
+      case 'cobblestone':
+        weak = 0.4 * speedFactor;
+        strong = 0.2 * speedFactor;
+        break;
+      default:
+        weak = 0.05 * speedFactor;
+    }
+
+    this.activeEffects.set(FFBEffect.ROAD_SURFACE, { weak, strong });
+    this._updateContinuousVibration();
+  }
+
+  /**
+   * Play collision impact effect (one-shot)
+   * @param {number} intensity - Impact intensity (0-1)
+   */
+  playCollision(intensity) {
+    if (!this.ffbEnabled) return;
+
+    const strong = Math.min(1, intensity);
+    const weak = strong * 0.5;
+
+    // Strong initial pulse
+    this.playVibration(weak, strong, 150);
+
+    // Followed by decay
+    setTimeout(() => {
+      this.playVibration(weak * 0.5, strong * 0.3, 100);
+    }, 150);
+  }
+
+  /**
+   * Play braking feedback effect
+   * @param {number} brakeForce - Brake force (0-1)
+   * @param {boolean} abs - Whether ABS is active
+   */
+  playBrakeEffect(brakeForce, abs = false) {
+    if (!this.ffbEnabled || !this.vibrationActuator) return;
+
+    let weak = brakeForce * 0.2;
+    let strong = brakeForce * 0.3;
+
+    // ABS pulse effect
+    if (abs && brakeForce > 0.5) {
+      weak = 0.4;
+      strong = 0.2;
+    }
+
+    this.activeEffects.set(FFBEffect.BRAKE, { weak, strong });
+    this._updateContinuousVibration();
+  }
+
+  /**
+   * Clear a continuous effect
+   * @param {string} effect - Effect type from FFBEffect
+   */
+  clearEffect(effect) {
+    this.activeEffects.delete(effect);
+    this._updateContinuousVibration();
+  }
+
+  /**
+   * Update continuous vibration by combining all active effects
+   * @private
+   */
+  _updateContinuousVibration() {
+    if (!this.vibrationActuator) return;
+
+    let totalWeak = 0;
+    let totalStrong = 0;
+
+    // Sum all active effects
+    for (const effect of this.activeEffects.values()) {
+      totalWeak += effect.weak;
+      totalStrong += effect.strong;
+    }
+
+    // Clamp to 0-1 range
+    totalWeak = Math.min(1, totalWeak);
+    totalStrong = Math.min(1, totalStrong);
+
+    // Only update if changed significantly
+    if (Math.abs(totalWeak - this.currentVibration.weak) > 0.05 ||
+        Math.abs(totalStrong - this.currentVibration.strong) > 0.05) {
+      this.currentVibration = { weak: totalWeak, strong: totalStrong };
+      this.playVibration(totalWeak, totalStrong, 50);
     }
   }
 }
