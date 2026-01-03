@@ -26,6 +26,7 @@ import { RadioWidget } from '../ui/RadioWidget.js';
 import { Garage } from '../ui/Garage.js';
 import { FuelSystem } from '../systems/FuelSystem.js';
 import { Notification } from '../ui/Notification.js';
+import { EnvironmentProps } from '../world/EnvironmentProps.js';
 
 export class BabylonGame {
   constructor() {
@@ -62,6 +63,9 @@ export class BabylonGame {
     this.poiData = null;
     this.roadMeshes = [];
 
+    // Environment
+    this.environmentProps = null;
+
     // Game state
     this.gameState = 'menu';
     this.playerMoney = 5000;
@@ -69,8 +73,9 @@ export class BabylonGame {
     // Vehicle
     this.vehicleMesh = null;
     this.vehicleBody = null;
+    this.vehicleContainer = null;
+    this.truckModel = null;
     this.wheelMeshes = [];
-    this.wheelBodies = [];
     this.truckSpeed = 0;
     this.headlightsOn = false;
 
@@ -118,20 +123,30 @@ export class BabylonGame {
 
     updateLoadingProgress(35);
 
-    // Create scene with physics
+    // Create scene with physics (no ground yet)
     await this.createScene();
 
     updateLoadingProgress(55);
 
-    // Load road data
+    // Load road data first (needed to position ground correctly)
     await this.loadRoads();
+
+    updateLoadingProgress(65);
+
+    // Create ground AFTER roads are loaded so we know the correct elevation
+    await this.createGround();
 
     updateLoadingProgress(70);
 
-    // Create vehicle
-    this.createVehicle();
+    // Generate environment props (trees, buildings)
+    await this.generateEnvironment();
 
-    updateLoadingProgress(80);
+    updateLoadingProgress(75);
+
+    // Create vehicle
+    await this.createVehicle();
+
+    updateLoadingProgress(85);
 
     // Create audio manager
     this.audio = new AudioManager();
@@ -166,9 +181,11 @@ export class BabylonGame {
     // Sky color
     this.scene.clearColor = new BABYLON.Color4(0.53, 0.81, 0.92, 1);
 
-    // Create camera
+    // Create camera with extended view distance for large world
     this.camera = new BABYLON.FreeCamera('camera', new BABYLON.Vector3(0, 10, 20), this.scene);
     this.camera.attachControl(this.canvas, false);
+    this.camera.minZ = 0.5;
+    this.camera.maxZ = 50000; // 50km view distance
 
     // Lighting
     const ambientLight = new BABYLON.HemisphericLight('ambient', new BABYLON.Vector3(0, 1, 0), this.scene);
@@ -183,9 +200,6 @@ export class BabylonGame {
     shadowGenerator.useBlurExponentialShadowMap = true;
     this.shadowGenerator = shadowGenerator;
 
-    // Create ground
-    await this.createGround();
-
     console.log('Scene created with Havok physics');
   }
 
@@ -193,25 +207,22 @@ export class BabylonGame {
    * Create ground plane with physics
    */
   async createGround() {
-    // Determine ground position from road data
-    let groundY = 0;
-    let groundX = 0;
-    let groundZ = 0;
+    // Calculate ground position and size from road bounds
+    const bounds = this.getBounds();
+    const groundX = (bounds.minX + bounds.maxX) / 2;
+    const groundZ = (bounds.minZ + bounds.maxZ) / 2;
+    const groundY = (this.startPosition?.y || 0) - 5; // Ground slightly below spawn point
 
-    if (this.roadData && this.roadData.length > 0) {
-      const firstRoad = this.roadData[0];
-      if (firstRoad.points && firstRoad.points.length > 0) {
-        const point = firstRoad.points[0];
-        groundX = point[0];
-        groundY = point[1] || 0;
-        groundZ = point[2];
-      }
-    }
+    // Ground size with margin
+    const groundWidth = (bounds.maxX - bounds.minX) + 2000;
+    const groundDepth = (bounds.maxZ - bounds.minZ) + 2000;
 
-    // Large ground plane
+    console.log(`Creating ground at (${groundX.toFixed(0)}, ${groundY.toFixed(0)}, ${groundZ.toFixed(0)}) size ${groundWidth.toFixed(0)}x${groundDepth.toFixed(0)}`);
+
+    // Large ground plane covering all roads
     const ground = BABYLON.MeshBuilder.CreateGround('ground', {
-      width: 5000,
-      height: 5000,
+      width: groundWidth,
+      height: groundDepth,
     }, this.scene);
 
     ground.position = new BABYLON.Vector3(groundX, groundY, groundZ);
@@ -242,35 +253,36 @@ export class BabylonGame {
     try {
       const response = await fetch('/data/processed/roads.json');
       if (response.ok) {
-        this.roadData = await response.json();
+        const data = await response.json();
+        // Handle both formats: { roads: [...] } or just [...]
+        this.roadData = data.roads || data;
         console.log(`Loaded ${this.roadData.length} roads`);
 
         // Load POIs
         const poiResponse = await fetch('/data/processed/pois.json');
         if (poiResponse.ok) {
-          this.poiData = await poiResponse.json();
+          const poiData = await poiResponse.json();
+          // Handle both formats: { pois: [...] } or just [...]
+          this.poiData = poiData.pois || poiData;
           console.log(`Loaded ${this.poiData.length} POIs`);
         }
 
         // Render roads
         this.renderRoads();
 
-        // Update ground position based on road data
+        // Set spawn position from road data
         if (this.roadData.length > 0) {
           const majorRoad = this.roadData.find(r => r.type === 'primary' || r.type === 'trunk') || this.roadData[0];
           if (majorRoad && majorRoad.points && majorRoad.points.length > 0) {
             const midIndex = Math.floor(majorRoad.points.length / 2);
             const point = majorRoad.points[midIndex];
+            // Spawn 5 meters above road surface to ensure truck lands on road
             this.startPosition = {
               x: point[0],
-              y: (point[1] || 0) + 2,
+              y: (point[1] || 0) + 5,
               z: point[2],
             };
-
-            // Reposition ground
-            if (this.ground) {
-              this.ground.position = new BABYLON.Vector3(point[0], point[1] || 0, point[2]);
-            }
+            console.log(`Start position set to (${point[0].toFixed(0)}, ${((point[1] || 0) + 5).toFixed(0)}, ${point[2].toFixed(0)})`);
           }
         }
 
@@ -314,18 +326,24 @@ export class BabylonGame {
   }
 
   /**
-   * Render roads using Babylon.js meshes
+   * Render roads using Babylon.js ribbon meshes with lane markings
    */
   renderRoads() {
-    if (!this.roadData) return;
+    if (!this.roadData) {
+      console.warn('No road data to render');
+      return;
+    }
 
+    console.log(`Rendering ${this.roadData.length} roads...`);
+
+    // Asphalt colors - visible gray tones
     const roadColors = {
-      motorway: new BABYLON.Color3(0.2, 0.2, 0.2),
-      trunk: new BABYLON.Color3(0.25, 0.25, 0.25),
-      primary: new BABYLON.Color3(0.3, 0.3, 0.3),
-      secondary: new BABYLON.Color3(0.35, 0.35, 0.35),
-      tertiary: new BABYLON.Color3(0.4, 0.4, 0.4),
-      default: new BABYLON.Color3(0.45, 0.45, 0.45),
+      motorway: new BABYLON.Color3(0.25, 0.25, 0.28),
+      trunk: new BABYLON.Color3(0.28, 0.28, 0.30),
+      primary: new BABYLON.Color3(0.30, 0.30, 0.32),
+      secondary: new BABYLON.Color3(0.32, 0.32, 0.34),
+      tertiary: new BABYLON.Color3(0.35, 0.35, 0.37),
+      default: new BABYLON.Color3(0.38, 0.38, 0.40),
     };
 
     const roadWidths = {
@@ -338,129 +356,297 @@ export class BabylonGame {
     };
 
     let roadCount = 0;
+    let errorCount = 0;
+
+    // Shared materials
+    const lineMaterial = new BABYLON.StandardMaterial('roadLineMat', this.scene);
+    lineMaterial.diffuseColor = new BABYLON.Color3(1, 1, 0.9); // Slightly warm white/yellow
+    lineMaterial.emissiveColor = new BABYLON.Color3(0.3, 0.3, 0.2);
+    lineMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+    lineMaterial.backFaceCulling = false;
+
+    const edgeLineMaterial = new BABYLON.StandardMaterial('edgeLineMat', this.scene);
+    edgeLineMaterial.diffuseColor = new BABYLON.Color3(1, 1, 1);
+    edgeLineMaterial.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+    edgeLineMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+    edgeLineMaterial.backFaceCulling = false;
 
     for (const road of this.roadData) {
       if (!road.points || road.points.length < 2) continue;
 
       const width = roadWidths[road.type] || roadWidths.default;
       const color = roadColors[road.type] || roadColors.default;
+      const halfWidth = width / 2;
 
-      // Create path from points
-      const path = road.points.map(p => new BABYLON.Vector3(p[0], (p[1] || 0) + 0.1, p[2]));
-
-      // Create ribbon for road
       try {
-        const roadMesh = BABYLON.MeshBuilder.CreateTube(`road_${roadCount}`, {
-          path: path,
-          radius: width / 2,
-          tessellation: 4,
-          cap: BABYLON.Mesh.NO_CAP,
-          sideOrientation: BABYLON.Mesh.DOUBLESIDE,
-        }, this.scene);
+        // Create paths for road and lines
+        const leftPath = [];
+        const rightPath = [];
+        const centerPath = [];
+        const leftEdgePath = [];
+        const rightEdgePath = [];
 
-        // Flatten the tube to make it a road
-        roadMesh.scaling.y = 0.1;
+        for (let i = 0; i < road.points.length; i++) {
+          const p = road.points[i];
+          const baseY = (p[1] || 0) + 0.15;
+          const curr = new BABYLON.Vector3(p[0], baseY, p[2]);
+
+          // Get direction to next/prev point for perpendicular offset
+          let dir;
+          if (i < road.points.length - 1) {
+            const next = road.points[i + 1];
+            dir = new BABYLON.Vector3(next[0] - p[0], 0, next[2] - p[2]);
+          } else {
+            const prev = road.points[i - 1];
+            dir = new BABYLON.Vector3(p[0] - prev[0], 0, p[2] - prev[2]);
+          }
+
+          // Handle zero-length direction
+          if (dir.length() < 0.001) {
+            dir = new BABYLON.Vector3(1, 0, 0);
+          }
+          dir.normalize();
+
+          // Perpendicular vector (rotate 90 degrees in XZ plane)
+          const perp = new BABYLON.Vector3(-dir.z, 0, dir.x);
+
+          leftPath.push(curr.add(perp.scale(halfWidth)));
+          rightPath.push(curr.subtract(perp.scale(halfWidth)));
+
+          // Center line (slightly above road)
+          const lineY = baseY + 0.02;
+          centerPath.push(new BABYLON.Vector3(p[0], lineY, p[2]));
+
+          // Edge lines
+          leftEdgePath.push(new BABYLON.Vector3(
+            p[0] + perp.x * (halfWidth - 0.3),
+            lineY,
+            p[2] + perp.z * (halfWidth - 0.3)
+          ));
+          rightEdgePath.push(new BABYLON.Vector3(
+            p[0] - perp.x * (halfWidth - 0.3),
+            lineY,
+            p[2] - perp.z * (halfWidth - 0.3)
+          ));
+        }
+
+        // Need at least 2 points for a ribbon
+        if (leftPath.length < 2) continue;
+
+        // Create road surface ribbon mesh
+        const roadMesh = BABYLON.MeshBuilder.CreateRibbon(`road_${roadCount}`, {
+          pathArray: [leftPath, rightPath],
+          sideOrientation: BABYLON.Mesh.DOUBLESIDE,
+          updatable: false,
+        }, this.scene);
 
         const material = new BABYLON.StandardMaterial(`roadMat_${roadCount}`, this.scene);
         material.diffuseColor = color;
-        material.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        material.specularColor = new BABYLON.Color3(0.15, 0.15, 0.15);
+        material.backFaceCulling = false;
+        material.emissiveColor = color.scale(0.15); // Slight ambient for visibility
         roadMesh.material = material;
         roadMesh.receiveShadows = true;
 
         this.roadMeshes.push(roadMesh);
+
+        // Create center line (dashed effect using tube)
+        if (centerPath.length >= 2) {
+          const centerLine = BABYLON.MeshBuilder.CreateTube(`centerLine_${roadCount}`, {
+            path: centerPath,
+            radius: 0.15,
+            tessellation: 6,
+            sideOrientation: BABYLON.Mesh.DOUBLESIDE,
+          }, this.scene);
+          centerLine.material = lineMaterial;
+          this.roadMeshes.push(centerLine);
+        }
+
+        // Create edge lines for major roads
+        if ((road.type === 'motorway' || road.type === 'trunk' || road.type === 'primary') && leftEdgePath.length >= 2) {
+          const leftLine = BABYLON.MeshBuilder.CreateTube(`leftEdge_${roadCount}`, {
+            path: leftEdgePath,
+            radius: 0.1,
+            tessellation: 6,
+            sideOrientation: BABYLON.Mesh.DOUBLESIDE,
+          }, this.scene);
+          leftLine.material = edgeLineMaterial;
+          this.roadMeshes.push(leftLine);
+
+          const rightLine = BABYLON.MeshBuilder.CreateTube(`rightEdge_${roadCount}`, {
+            path: rightEdgePath,
+            radius: 0.1,
+            tessellation: 6,
+            sideOrientation: BABYLON.Mesh.DOUBLESIDE,
+          }, this.scene);
+          rightLine.material = edgeLineMaterial;
+          this.roadMeshes.push(rightLine);
+        }
+
         roadCount++;
       } catch (e) {
-        // Skip invalid roads
+        errorCount++;
+        if (errorCount < 5) {
+          console.warn('Failed to create road:', e.message);
+        }
       }
     }
 
-    console.log(`Rendered ${roadCount} roads`);
+    console.log(`Rendered ${roadCount} roads with lane markings (${errorCount} errors)`);
+
+    // Log first road position for debugging
+    if (this.roadData.length > 0 && this.roadData[0].points && this.roadData[0].points.length > 0) {
+      const firstPoint = this.roadData[0].points[0];
+      console.log(`First road point: (${firstPoint[0]?.toFixed(0)}, ${firstPoint[1]?.toFixed(0)}, ${firstPoint[2]?.toFixed(0)})`);
+    }
+  }
+
+  /**
+   * Generate environment props (trees, buildings)
+   */
+  async generateEnvironment() {
+    if (!this.roadData || this.roadData.length === 0) {
+      console.log('No road data for environment generation');
+      return;
+    }
+
+    this.environmentProps = new EnvironmentProps(this.scene, this.shadowGenerator);
+    await this.environmentProps.generate(this.roadData);
   }
 
   /**
    * Create vehicle with Havok physics
    */
-  createVehicle() {
+  async createVehicle() {
     const startPos = this.startPosition || { x: 0, y: 2, z: 0 };
 
-    // Create chassis mesh
+    // Create a container for the vehicle
+    this.vehicleContainer = new BABYLON.TransformNode('vehicleContainer', this.scene);
+    this.vehicleContainer.position = new BABYLON.Vector3(startPos.x, startPos.y, startPos.z);
+
+    // Create invisible physics box for collision
     const chassisWidth = 2.5;
     const chassisHeight = 1.5;
-    const chassisLength = 6;
+    const chassisLength = 4;
 
-    const chassis = BABYLON.MeshBuilder.CreateBox('chassis', {
+    const physicsBox = BABYLON.MeshBuilder.CreateBox('physicsBox', {
       width: chassisWidth,
       height: chassisHeight,
       depth: chassisLength,
     }, this.scene);
+    physicsBox.visibility = 0; // Invisible
+    physicsBox.position = new BABYLON.Vector3(startPos.x, startPos.y, startPos.z);
 
-    // Truck color (green like branding)
-    const chassisMaterial = new BABYLON.StandardMaterial('chassisMat', this.scene);
-    chassisMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.69, 0.31);
-    chassis.material = chassisMaterial;
-    chassis.position = new BABYLON.Vector3(startPos.x, startPos.y, startPos.z);
-
-    // Add cabin
-    const cabin = BABYLON.MeshBuilder.CreateBox('cabin', {
-      width: chassisWidth,
-      height: 1,
-      depth: 2,
-    }, this.scene);
-    cabin.material = chassisMaterial;
-    cabin.position = new BABYLON.Vector3(0, chassisHeight / 2 + 0.5, chassisLength / 2 - 1.5);
-    cabin.parent = chassis;
-
-    // Add shadows
-    if (this.shadowGenerator) {
-      this.shadowGenerator.addShadowCaster(chassis);
-      this.shadowGenerator.addShadowCaster(cabin);
-    }
-
-    this.vehicleMesh = chassis;
-
-    // Create physics body for chassis
+    // Create physics body for the invisible box
     const chassisAggregate = new BABYLON.PhysicsAggregate(
-      chassis,
+      physicsBox,
       BABYLON.PhysicsShapeType.BOX,
       {
         mass: 2000,
-        friction: 0.5,
+        friction: 0.8,
         restitution: 0.1,
       },
       this.scene
     );
 
     this.vehicleBody = chassisAggregate.body;
+    this.vehicleMesh = physicsBox;
 
-    // Increase angular damping to prevent flipping
+    // Disable sleeping so vehicle always responds to input
+    this.vehicleBody.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
+    this.vehicleBody.disablePreStep = false;
+
+    // Increase damping to prevent flipping
     this.vehicleBody.setLinearDamping(0.3);
-    this.vehicleBody.setAngularDamping(0.9);
+    this.vehicleBody.setAngularDamping(0.95);
 
-    // Create wheels
-    this.createWheels(chassis, chassisAggregate);
+    // Load GLB truck model
+    let modelLoaded = false;
+    try {
+      const result = await BABYLON.SceneLoader.ImportMeshAsync('', '/models/vehicles/', 'vehicle-truck.glb', this.scene);
 
-    // Position camera
-    this.camera.position = new BABYLON.Vector3(startPos.x, startPos.y + 10, startPos.z + 20);
-    this.camera.setTarget(chassis.position);
+      if (result.meshes.length > 0) {
+        this.truckModel = result.meshes[0];
+        this.truckModel.parent = this.vehicleContainer;
+        this.truckModel.position = new BABYLON.Vector3(0, -0.7, 0);
+        this.truckModel.scaling = new BABYLON.Vector3(2.0, 2.0, 2.0);
+        // Rotate 180 degrees so model faces Z+ (forward direction)
+        this.truckModel.rotation = new BABYLON.Vector3(0, Math.PI, 0);
+
+        // Enable shadows on all meshes
+        result.meshes.forEach(mesh => {
+          if (this.shadowGenerator) {
+            this.shadowGenerator.addShadowCaster(mesh);
+          }
+          mesh.receiveShadows = true;
+        });
+
+        console.log('Truck GLB model loaded with', result.meshes.length, 'meshes');
+        modelLoaded = true;
+      }
+    } catch (e) {
+      console.warn('Failed to load truck model, using fallback:', e);
+    }
+
+    // Only create fallback truck and wheels if GLB model failed
+    if (!modelLoaded) {
+      this.createFallbackTruck();
+      this.createWheels();
+    }
+
+    // Position camera behind the truck (Z- is behind since vehicle faces Z+)
+    this.camera.position = new BABYLON.Vector3(startPos.x, startPos.y + 10, startPos.z - 20);
+    this.camera.setTarget(physicsBox.position);
 
     console.log(`Vehicle created at (${startPos.x.toFixed(0)}, ${startPos.y.toFixed(0)}, ${startPos.z.toFixed(0)})`);
   }
 
   /**
-   * Create wheels with physics constraints
+   * Create fallback truck if GLB fails to load
    */
-  createWheels(chassis, chassisAggregate) {
-    const wheelRadius = 0.5;
-    const wheelWidth = 0.4;
-    const chassisWidth = 2.5;
-    const chassisLength = 6;
+  createFallbackTruck() {
+    const chassisMaterial = new BABYLON.StandardMaterial('chassisMat', this.scene);
+    chassisMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.69, 0.31);
 
-    // Wheel positions relative to chassis (front-left, front-right, back-left, back-right)
+    // Body
+    const body = BABYLON.MeshBuilder.CreateBox('truckBody', {
+      width: 2,
+      height: 1,
+      depth: 3.5,
+    }, this.scene);
+    body.material = chassisMaterial;
+    body.position.y = 0;
+    body.parent = this.vehicleContainer;
+
+    // Cabin
+    const cabin = BABYLON.MeshBuilder.CreateBox('truckCabin', {
+      width: 2,
+      height: 0.8,
+      depth: 1.2,
+    }, this.scene);
+    cabin.material = chassisMaterial;
+    cabin.position = new BABYLON.Vector3(0, 0.9, 1);
+    cabin.parent = this.vehicleContainer;
+
+    if (this.shadowGenerator) {
+      this.shadowGenerator.addShadowCaster(body);
+      this.shadowGenerator.addShadowCaster(cabin);
+    }
+  }
+
+  /**
+   * Create visual wheels (parented to vehicle, no physics)
+   */
+  createWheels() {
+    const wheelRadius = 0.4;
+    const wheelWidth = 0.3;
+
+    // Wheel positions relative to vehicle center
     const wheelPositions = [
-      { x: -chassisWidth / 2 - wheelWidth / 2, y: -0.5, z: chassisLength / 2 - 1, isFront: true },
-      { x: chassisWidth / 2 + wheelWidth / 2, y: -0.5, z: chassisLength / 2 - 1, isFront: true },
-      { x: -chassisWidth / 2 - wheelWidth / 2, y: -0.5, z: -chassisLength / 2 + 1, isFront: false },
-      { x: chassisWidth / 2 + wheelWidth / 2, y: -0.5, z: -chassisLength / 2 + 1, isFront: false },
+      { x: -1.0, y: -0.6, z: 1.2, isFront: true },   // Front-left
+      { x: 1.0, y: -0.6, z: 1.2, isFront: true },    // Front-right
+      { x: -1.0, y: -0.6, z: -1.2, isFront: false }, // Back-left
+      { x: 1.0, y: -0.6, z: -1.2, isFront: false },  // Back-right
     ];
 
     const wheelMaterial = new BABYLON.StandardMaterial('wheelMat', this.scene);
@@ -478,58 +664,17 @@ export class BabylonGame {
 
       wheel.rotation.z = Math.PI / 2;
       wheel.material = wheelMaterial;
-
-      // Position wheel relative to chassis world position
-      const worldPos = new BABYLON.Vector3(
-        chassis.position.x + pos.x,
-        chassis.position.y + pos.y,
-        chassis.position.z + pos.z
-      );
-      wheel.position = worldPos;
+      wheel.position = new BABYLON.Vector3(pos.x, pos.y, pos.z);
+      wheel.parent = this.vehicleContainer; // Parent to vehicle, moves with it
 
       if (this.shadowGenerator) {
         this.shadowGenerator.addShadowCaster(wheel);
       }
 
       this.wheelMeshes.push({ mesh: wheel, isFront: pos.isFront, localPos: pos });
-
-      // Create wheel physics
-      const wheelAggregate = new BABYLON.PhysicsAggregate(
-        wheel,
-        BABYLON.PhysicsShapeType.CYLINDER,
-        {
-          mass: 20,
-          friction: 0.8,
-          restitution: 0.1,
-        },
-        this.scene
-      );
-
-      this.wheelBodies.push({ body: wheelAggregate.body, isFront: pos.isFront });
-
-      // Create 6DoF constraint for suspension
-      // This connects the wheel to the chassis with spring-like behavior
-      const jointData = {
-        pivotA: new BABYLON.Vector3(pos.x, pos.y, pos.z),
-        pivotB: new BABYLON.Vector3(0, 0, 0),
-        axisA: new BABYLON.Vector3(1, 0, 0),
-        axisB: new BABYLON.Vector3(1, 0, 0),
-      };
-
-      // Use a hinge constraint for wheel rotation around axle
-      const constraint = new BABYLON.Physics6DoFConstraint(
-        jointData,
-        [
-          { axis: BABYLON.PhysicsConstraintAxis.LINEAR_Y, minLimit: -0.3, maxLimit: 0.1 }, // Suspension travel
-          { axis: BABYLON.PhysicsConstraintAxis.ANGULAR_X, minLimit: -Math.PI * 2, maxLimit: Math.PI * 2 }, // Wheel rotation
-        ],
-        this.scene
-      );
-
-      chassisAggregate.body.addConstraint(wheelAggregate.body, constraint);
     }
 
-    console.log('Wheels created with 6DoF constraints');
+    console.log('Visual wheels created (no physics)');
   }
 
   /**
@@ -591,7 +736,7 @@ export class BabylonGame {
     this.mainMenu = new MainMenu(this.ui, {
       onStart: () => this.startGame(),
       onOptions: () => this.showOptions('menu'),
-      onAbout: () => console.log('About'),
+      onAbout: () => this.showAbout(),
     });
     this.mainMenu.init();
 
@@ -657,6 +802,114 @@ export class BabylonGame {
       this.mainMenu.show();
     } else if (this.optionsReturnTo === 'paused') {
       this.pauseMenu.show();
+    }
+  }
+
+  /**
+   * Show about dialog
+   */
+  showAbout() {
+    // Create about overlay if it doesn't exist
+    if (!this.aboutOverlay) {
+      this.aboutOverlay = document.createElement('div');
+      this.aboutOverlay.id = 'about-overlay';
+      this.aboutOverlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.85);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+      `;
+
+      const aboutBox = document.createElement('div');
+      aboutBox.style.cssText = `
+        background: linear-gradient(145deg, #2a3a2a, #1a2a1a);
+        border: 2px solid #4CAF50;
+        border-radius: 12px;
+        padding: 40px;
+        max-width: 500px;
+        text-align: center;
+        color: #fff;
+        font-family: 'Segoe UI', sans-serif;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      `;
+
+      // Logo
+      const logo = document.createElement('img');
+      logo.src = '/images/mts-logo.png';
+      logo.alt = 'MTS Logo';
+      logo.style.cssText = 'width: 120px; height: 120px; margin-bottom: 20px;';
+      aboutBox.appendChild(logo);
+
+      // Title
+      const title = document.createElement('h2');
+      title.textContent = 'Mindanao Truck Simulator';
+      title.style.cssText = 'color: #4CAF50; margin: 0 0 10px 0; font-size: 24px;';
+      aboutBox.appendChild(title);
+
+      // Version
+      const version = document.createElement('p');
+      version.textContent = 'Version 0.1.0';
+      version.style.cssText = 'color: #888; margin: 0 0 20px 0; font-size: 14px;';
+      aboutBox.appendChild(version);
+
+      // Description
+      const desc = document.createElement('p');
+      desc.textContent = 'Experience the scenic roads of Mindanao, Philippines in this relaxing truck driving simulator. Deliver cargo across cities, enjoy the tropical scenery, and build your trucking empire.';
+      desc.style.cssText = 'line-height: 1.6; margin-bottom: 20px;';
+      aboutBox.appendChild(desc);
+
+      // Credits
+      const credits = document.createElement('p');
+      credits.style.cssText = 'color: #888; font-size: 13px; margin-bottom: 25px;';
+      credits.appendChild(document.createTextNode('Powered by Babylon.js & Havok Physics'));
+      credits.appendChild(document.createElement('br'));
+      credits.appendChild(document.createTextNode('Road data from OpenStreetMap'));
+      aboutBox.appendChild(credits);
+
+      // Close button
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = 'Close';
+      closeBtn.style.cssText = `
+        background: #4CAF50;
+        color: white;
+        border: none;
+        padding: 12px 40px;
+        font-size: 16px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.2s;
+      `;
+      closeBtn.addEventListener('click', () => this.hideAbout());
+      closeBtn.addEventListener('mouseenter', () => closeBtn.style.background = '#45a049');
+      closeBtn.addEventListener('mouseleave', () => closeBtn.style.background = '#4CAF50');
+      aboutBox.appendChild(closeBtn);
+
+      this.aboutOverlay.appendChild(aboutBox);
+      document.body.appendChild(this.aboutOverlay);
+
+      // Click outside to close
+      this.aboutOverlay.addEventListener('click', (e) => {
+        if (e.target === this.aboutOverlay) {
+          this.hideAbout();
+        }
+      });
+    }
+
+    this.aboutOverlay.style.display = 'flex';
+  }
+
+  /**
+   * Hide about dialog
+   */
+  hideAbout() {
+    if (this.aboutOverlay) {
+      this.aboutOverlay.style.display = 'none';
     }
   }
 
@@ -918,51 +1171,120 @@ export class BabylonGame {
     const speed = velocity.length();
     this.truckSpeed = speed;
 
-    // Get forward direction from vehicle rotation
-    const forward = this.vehicleMesh.forward.clone();
+    // Get forward direction from vehicle mesh (Z+ is forward in Babylon.js)
+    const rotQuat = this.vehicleMesh.rotationQuaternion || BABYLON.Quaternion.FromEulerAngles(
+      this.vehicleMesh.rotation.x,
+      this.vehicleMesh.rotation.y,
+      this.vehicleMesh.rotation.z
+    );
+    const forward = new BABYLON.Vector3(0, 0, 1); // Z+ is forward
+    forward.rotateByQuaternionToRef(rotQuat, forward);
+    forward.y = 0; // Keep horizontal
+    forward.normalize();
 
-    // Engine force
-    const engineForce = 15000;
-    const maxSpeed = 30;
+    // Engine force - 120 km/h = 33.33 m/s
+    const engineForce = 25000;
+    const maxSpeed = 33.33; // 120 km/h
+
+    // Wake up physics body if there's any input
+    if (throttle > 0 || brake > 0 || Math.abs(steering) > 0.01) {
+      this.vehicleBody.setMotionType(BABYLON.PhysicsMotionType.DYNAMIC);
+    }
 
     if (throttle > 0 && speed < maxSpeed) {
-      const force = forward.scale(throttle * engineForce);
+      // Progressive force based on speed (more power at low speed)
+      const speedFactor = 1 - (speed / maxSpeed) * 0.3;
+      const force = forward.scale(throttle * engineForce * speedFactor);
       this.vehicleBody.applyForce(force, this.vehicleMesh.position);
     }
 
     // Braking
     if (brake > 0) {
       if (speed > 0.5) {
-        // Brake
-        const brakeDir = velocity.normalize().scale(-1);
-        const brakeForce = brakeDir.scale(brake * 20000);
+        // Brake - apply force opposite to velocity
+        const brakeDir = velocity.clone();
+        brakeDir.normalize();
+        brakeDir.scaleInPlace(-1);
+        const brakeForce = brakeDir.scale(brake * 30000);
         this.vehicleBody.applyForce(brakeForce, this.vehicleMesh.position);
       } else {
-        // Reverse
-        const force = forward.scale(-brake * engineForce * 0.5);
-        this.vehicleBody.applyForce(force, this.vehicleMesh.position);
+        // Reverse (max 30 km/h = 8.33 m/s)
+        const reverseMaxSpeed = 8.33;
+        if (speed < reverseMaxSpeed) {
+          const force = forward.scale(-brake * engineForce * 0.4);
+          this.vehicleBody.applyForce(force, this.vehicleMesh.position);
+        }
       }
     }
 
     // Handbrake
     if (handbrake && speed > 0.1) {
       const currentVel = this.vehicleBody.getLinearVelocity();
-      this.vehicleBody.setLinearVelocity(currentVel.scale(0.95));
+      this.vehicleBody.setLinearVelocity(currentVel.scale(0.85));
     }
 
-    // Steering (apply torque)
-    if (Math.abs(speed) > 0.5 && Math.abs(steering) > 0.01) {
-      const steerTorque = new BABYLON.Vector3(0, -steering * 3000, 0);
-      this.vehicleBody.applyForce(steerTorque, this.vehicleMesh.position.add(forward));
+    // Improved steering with smoother response
+    const currentAngVel = this.vehicleBody.getAngularVelocity();
+
+    if (Math.abs(steering) > 0.01 && speed > 0.5) {
+      // Steering rate decreases at higher speeds for stability
+      // Max turn rate ~1.2 rad/s at low speed, ~0.4 rad/s at max speed
+      const speedFactor = Math.max(0.35, 1 - (speed / maxSpeed) * 0.7);
+      const targetSteerRate = steering * 1.2 * speedFactor;
+
+      // Smooth interpolation towards target steering (prevents jerky turns)
+      const currentYaw = currentAngVel.y;
+      const steerRate = currentYaw + (targetSteerRate - currentYaw) * 0.15;
+
+      this.vehicleBody.setAngularVelocity(new BABYLON.Vector3(
+        currentAngVel.x * 0.9,
+        steerRate,
+        currentAngVel.z * 0.9
+      ));
+    } else if (speed > 0.5) {
+      // Auto-center when no steering input - gradual return to straight
+      this.vehicleBody.setAngularVelocity(new BABYLON.Vector3(
+        currentAngVel.x * 0.9,
+        currentAngVel.y * 0.92, // Gentle damping for smooth centering
+        currentAngVel.z * 0.9
+      ));
     }
 
-    // Keep upright - apply corrective torque if tilting
-    const up = this.vehicleMesh.up;
-    const tiltAngle = Math.acos(BABYLON.Vector3.Dot(up, BABYLON.Vector3.Up()));
-    if (tiltAngle > 0.1) {
-      const correctiveAxis = BABYLON.Vector3.Cross(up, BABYLON.Vector3.Up());
-      const correctiveTorque = correctiveAxis.scale(tiltAngle * 5000);
-      this.vehicleBody.applyForce(correctiveTorque, this.vehicleMesh.position);
+    // Sync visual container with physics body
+    if (this.vehicleContainer) {
+      this.vehicleContainer.position.copyFrom(this.vehicleMesh.position);
+      if (this.vehicleMesh.rotationQuaternion) {
+        this.vehicleContainer.rotationQuaternion = this.vehicleMesh.rotationQuaternion.clone();
+      }
+    }
+
+    // Animate wheel rotation based on speed (only for fallback wheels)
+    if (this.wheelMeshes.length > 0) {
+      const wheelRadius = 0.4;
+      const wheelRotationSpeed = speed / wheelRadius * deltaTime;
+      for (const wheelData of this.wheelMeshes) {
+        // Rotate wheel around X axis (forward roll)
+        wheelData.mesh.rotation.x += wheelRotationSpeed;
+
+        // Front wheels also turn for steering
+        if (wheelData.isFront) {
+          wheelData.mesh.rotation.y = -steering * 0.5;
+        }
+      }
+    }
+
+    // Keep upright - limit rotation on X and Z axes
+    if (this.vehicleMesh.rotationQuaternion) {
+      const euler = this.vehicleMesh.rotationQuaternion.toEulerAngles();
+      if (Math.abs(euler.x) > 0.3 || Math.abs(euler.z) > 0.3) {
+        // Apply corrective angular velocity
+        const angVel = this.vehicleBody.getAngularVelocity();
+        this.vehicleBody.setAngularVelocity(new BABYLON.Vector3(
+          angVel.x * 0.8 - euler.x * 2,
+          angVel.y,
+          angVel.z * 0.8 - euler.z * 2
+        ));
+      }
     }
   }
 
@@ -979,23 +1301,28 @@ export class BabylonGame {
 
     switch (this.cameraMode) {
       case 'chase': {
-        const offset = new BABYLON.Vector3(0, 5, 12);
+        // Camera behind and above the vehicle (Z- is behind since vehicle faces Z+)
+        const offset = new BABYLON.Vector3(0, 6, -15);
         const rotMatrix = BABYLON.Matrix.RotationY(vehicleRot);
         const rotatedOffset = BABYLON.Vector3.TransformCoordinates(offset, rotMatrix);
         const targetPos = vehiclePos.add(rotatedOffset);
 
         this.camera.position = BABYLON.Vector3.Lerp(this.camera.position, targetPos, 5 * deltaTime);
-        this.camera.setTarget(vehiclePos.add(new BABYLON.Vector3(0, 1, 0)));
+        // Look at a point slightly in front of vehicle (Z+)
+        const lookAhead = new BABYLON.Vector3(0, 1, 10);
+        const rotatedLook = BABYLON.Vector3.TransformCoordinates(lookAhead, rotMatrix);
+        this.camera.setTarget(vehiclePos.add(rotatedLook));
         break;
       }
 
       case 'cockpit': {
-        const cockpitOffset = new BABYLON.Vector3(0, 2.5, 2);
+        // Inside the cabin looking forward (Z+)
+        const cockpitOffset = new BABYLON.Vector3(0, 2, -1);
         const rotMatrix = BABYLON.Matrix.RotationY(vehicleRot);
         const rotatedOffset = BABYLON.Vector3.TransformCoordinates(cockpitOffset, rotMatrix);
         this.camera.position = vehiclePos.add(rotatedOffset);
 
-        const lookOffset = new BABYLON.Vector3(0, 2, 10);
+        const lookOffset = new BABYLON.Vector3(0, 1.5, 20);
         const rotatedLook = BABYLON.Vector3.TransformCoordinates(lookOffset, rotMatrix);
         this.camera.setTarget(vehiclePos.add(rotatedLook));
         break;

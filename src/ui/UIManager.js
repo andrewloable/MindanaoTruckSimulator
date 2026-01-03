@@ -82,6 +82,20 @@ export class UIManager {
   }
 
   /**
+   * Hide a specific screen
+   * @param {string} name - Screen name
+   */
+  hideScreen(name) {
+    const element = this.screens.get(name);
+    if (element) {
+      element.style.display = 'none';
+    }
+    if (this.activeScreen === name) {
+      this.activeScreen = null;
+    }
+  }
+
+  /**
    * Hide all screens
    */
   hideAllScreens() {

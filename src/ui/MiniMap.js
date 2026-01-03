@@ -31,16 +31,16 @@ export class MiniMap {
     this.zoomLevels = [500, 1000, 2000, 5000, 10000];
     this.zoomIndex = 2;
 
-    // Colors
+    // Colors - bright for visibility on dark background
     this.colors = {
       background: 'rgba(20, 30, 20, 0.85)',
       road: {
-        motorway: '#666666',
-        trunk: '#555555',
-        primary: '#444444',
-        secondary: '#333333',
-        tertiary: '#2a2a2a',
-        default: '#333333',
+        motorway: '#ffffff',
+        trunk: '#e0e0e0',
+        primary: '#cccccc',
+        secondary: '#aaaaaa',
+        tertiary: '#888888',
+        default: '#777777',
       },
       player: '#4CAF50',
       city: '#ff6600',

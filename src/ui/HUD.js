@@ -191,16 +191,37 @@ export class HUD {
         display: flex;
         align-items: center;
         gap: 8px;
+        pointer-events: auto;
+        cursor: pointer;
+        transition: background 0.2s ease, transform 0.1s ease;
+      }
+      .hud__gps:hover {
+        background: rgba(76, 175, 80, 0.7);
+        transform: scale(1.02);
+      }
+      .hud__gps:active {
+        transform: scale(0.98);
       }
       .hud__gps-icon {
         color: #4CAF50;
         font-size: 14px;
+      }
+      .hud__gps:hover .hud__gps-icon {
+        color: white;
       }
       .hud__gps-coords {
         color: white;
         font-size: 13px;
         font-family: 'Consolas', 'Monaco', monospace;
         letter-spacing: 0.5px;
+      }
+      .hud__gps-hint {
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 10px;
+        margin-left: 4px;
+      }
+      .hud__gps:hover .hud__gps-hint {
+        color: rgba(255, 255, 255, 0.8);
       }
 
       /* Job Info Panel - Top Center */
@@ -321,9 +342,10 @@ export class HUD {
     controls.textContent = 'WASD: Drive | Space: Brake | C: Camera | J: Jobs | ESC: Pause';
     hud.appendChild(controls);
 
-    // GPS location display
+    // GPS location display (clickable to open Google Maps)
     const gps = document.createElement('div');
     gps.className = 'hud__gps';
+    gps.title = 'Click to open in Google Maps';
 
     const gpsIcon = document.createElement('span');
     gpsIcon.className = 'hud__gps-icon';
@@ -334,6 +356,16 @@ export class HUD {
     this.gpsValue.className = 'hud__gps-coords';
     this.gpsValue.textContent = '7.5000°N 124.5000°E';
     gps.appendChild(this.gpsValue);
+
+    const gpsHint = document.createElement('span');
+    gpsHint.className = 'hud__gps-hint';
+    gpsHint.textContent = '↗';
+    gps.appendChild(gpsHint);
+
+    // Click handler to open Google Maps
+    gps.addEventListener('click', () => {
+      this.openInGoogleMaps();
+    });
 
     hud.appendChild(gps);
 
@@ -475,6 +507,16 @@ export class HUD {
    */
   getLongitude() {
     return this.longitude;
+  }
+
+  /**
+   * Open current location in Google Maps in a new tab
+   */
+  openInGoogleMaps() {
+    const lat = this.latitude.toFixed(6);
+    const lon = this.longitude.toFixed(6);
+    const url = `https://www.google.com/maps?q=${lat},${lon}&z=15`;
+    window.open(url, '_blank');
   }
 
   /**
