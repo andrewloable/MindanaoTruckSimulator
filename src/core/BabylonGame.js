@@ -870,6 +870,8 @@ export class BabylonGame {
       credits.appendChild(document.createTextNode('Powered by Babylon.js & Havok Physics'));
       credits.appendChild(document.createElement('br'));
       credits.appendChild(document.createTextNode('Road data from OpenStreetMap'));
+      credits.appendChild(document.createElement('br'));
+      credits.appendChild(document.createTextNode('3D models by Kenney.nl (CC0)'));
       aboutBox.appendChild(credits);
 
       // Close button
