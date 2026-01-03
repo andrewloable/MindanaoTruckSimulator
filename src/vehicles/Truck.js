@@ -96,6 +96,9 @@ export class Truck {
    * Build the truck by loading GLB model
    */
   build() {
+    // Add immediate placeholder while model loads
+    this.createFallbackModel();
+    // Then try to load the real model
     this.loadModel();
   }
 

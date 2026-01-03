@@ -107,7 +107,8 @@ export class ChunkManager {
 
     for (const point of road.points) {
       const chunkX = Math.floor(point[0] / this.chunkSize);
-      const chunkZ = Math.floor(point[1] / this.chunkSize);
+      // point[1] is elevation (y), point[2] is z coordinate
+      const chunkZ = Math.floor(point[2] / this.chunkSize);
       chunks.add(this.getChunkKey(chunkX, chunkZ));
     }
 
@@ -139,10 +140,10 @@ export class ChunkManager {
    * @param {number} playerX - World X position
    * @param {number} playerZ - World Z position
    */
-  update(playerX, playerZ) {
-    // Throttle updates
+  update(playerX, playerZ, forceUpdate = false) {
+    // Throttle updates (skip throttle on force)
     const now = Date.now();
-    if (now - this.lastUpdateTime < this.updateInterval) {
+    if (!forceUpdate && now - this.lastUpdateTime < this.updateInterval) {
       return;
     }
     this.lastUpdateTime = now;
@@ -151,10 +152,13 @@ export class ChunkManager {
     const newChunkX = Math.floor(playerX / this.chunkSize);
     const newChunkZ = Math.floor(playerZ / this.chunkSize);
 
-    // Check if player moved to a new chunk
-    if (newChunkX !== this.playerChunkX || newChunkZ !== this.playerChunkZ) {
+    console.log(`ChunkManager.update: player at world (${playerX.toFixed(0)}, ${playerZ.toFixed(0)}) -> chunk (${newChunkX}, ${newChunkZ})`);
+
+    // Check if player moved to a new chunk (or force update)
+    if (forceUpdate || newChunkX !== this.playerChunkX || newChunkZ !== this.playerChunkZ) {
       this.playerChunkX = newChunkX;
       this.playerChunkZ = newChunkZ;
+      console.log(`ChunkManager: updating chunks around (${newChunkX}, ${newChunkZ})`);
       this.updateChunks();
     }
   }
@@ -165,6 +169,9 @@ export class ChunkManager {
   updateChunks() {
     const chunksToLoad = new Set();
     const chunksToUnload = new Set();
+
+    console.log(`updateChunks: roadIndex has ${this.roadIndex.size} entries`);
+    console.log(`updateChunks: sample keys from roadIndex:`, [...this.roadIndex.keys()].slice(0, 5));
 
     // Determine which chunks should be loaded
     for (let dx = -this.loadDistance; dx <= this.loadDistance; dx++) {
@@ -248,6 +255,7 @@ export class ChunkManager {
    */
   loadChunk(key) {
     const { x, z } = this.parseChunkKey(key);
+    console.log(`Loading chunk ${key} at grid (${x}, ${z})`);
 
     // Create chunk object
     const chunk = {
@@ -266,6 +274,7 @@ export class ChunkManager {
     // Get road indices for this chunk
     const roadIndices = this.roadIndex.get(key) || [];
     chunk.roadIndices = roadIndices;
+    console.log(`Chunk ${key}: ${roadIndices.length} roads to render`);
 
     // Create road meshes for this chunk
     if (this.roadGenerator && roadIndices.length > 0) {
@@ -280,6 +289,7 @@ export class ChunkManager {
           chunk.group.add(mesh);
         }
       }
+      console.log(`Chunk ${key}: created ${chunk.meshes.length} road meshes`);
     }
 
     // Create POI markers
@@ -298,6 +308,7 @@ export class ChunkManager {
     chunk.state = ChunkState.LOADED;
 
     this.chunksLoaded++;
+    console.log(`Chunk ${key} loaded with ${chunk.meshes.length} total meshes`);
 
     if (this.onChunkLoaded) {
       this.onChunkLoaded(chunk);

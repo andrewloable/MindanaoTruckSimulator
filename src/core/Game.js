@@ -850,6 +850,7 @@ export class Game {
     this.sunLight.shadow.camera.top = 100;
     this.sunLight.shadow.camera.bottom = -100;
     this.scene.add(this.sunLight);
+    this.scene.add(this.sunLight.target); // Target must be added to scene
 
     // Hemisphere light for sky/ground color variation
     const hemiLight = new THREE.HemisphereLight(0x87CEEB, 0x3d5c3d, 0.4);
@@ -860,17 +861,33 @@ export class Game {
    * Add test scene elements for initial development
    */
   addTestScene() {
-    // Determine world center - use road bounds if available
-    let worldCenterX = 0, worldCenterZ = 0;
+    // Determine truck start position first, then position ground around it
+    let startX = 0, startY = 2, startZ = 0;
+    console.log('addTestScene: roadGenerator exists:', !!this.roadGenerator);
+    console.log('addTestScene: roads loaded:', this.roadGenerator?.roads?.length || 0);
+
     if (this.roadGenerator && this.roadGenerator.roads.length > 0) {
-      const bounds = this.roadGenerator.getBounds();
-      worldCenterX = (bounds.minX + bounds.maxX) / 2;
-      worldCenterZ = (bounds.minZ + bounds.maxZ) / 2;
-      console.log(`World center set to road bounds: (${worldCenterX.toFixed(0)}, ${worldCenterZ.toFixed(0)})`);
+      const majorRoad = this.roadGenerator.roads.find(
+        r => r.type === 'primary' || r.type === 'trunk'
+      ) || this.roadGenerator.roads[0];
+
+      console.log('addTestScene: found major road:', majorRoad?.name, majorRoad?.type);
+
+      if (majorRoad && majorRoad.points && majorRoad.points.length > 0) {
+        const midIndex = Math.floor(majorRoad.points.length / 2);
+        const startPoint = majorRoad.points[midIndex];
+        startX = startPoint[0];
+        startY = (startPoint[1] || 0) + 2;
+        startZ = startPoint[2];
+        console.log('addTestScene: start position calculated:', { startX, startY, startZ });
+      }
+    } else {
+      console.log('addTestScene: No roads loaded, using default position');
     }
 
-    // Ground plane - position at world center
-    const groundGeometry = new THREE.PlaneGeometry(2000, 2000);
+    // Ground plane - position at truck location and road elevation
+    const groundElevation = startY - 2; // Match road elevation
+    const groundGeometry = new THREE.PlaneGeometry(5000, 5000);
     const groundMaterial = new THREE.MeshStandardMaterial({
       color: 0x3d5c3d, // Grass green
       roughness: 0.9,
@@ -878,9 +895,21 @@ export class Game {
     });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(worldCenterX, 0, worldCenterZ);
+    ground.position.set(startX, groundElevation, startZ);
     ground.receiveShadow = true;
     this.scene.add(ground);
+    console.log(`Ground plane positioned at: (${startX.toFixed(0)}, ${groundElevation.toFixed(0)}, ${startZ.toFixed(0)})`);
+
+    // Update physics ground to match road elevation
+    // Remove old ground and create new one at correct height
+    if (this.physics && this.physics.world) {
+      // Find and remove the old ground body
+      const groundBodies = this.physics.world.bodies.filter(b => b.type === 0); // STATIC = 0
+      groundBodies.forEach(b => this.physics.world.removeBody(b));
+      // Create new ground at road elevation
+      this.physics.createGroundPlane(groundElevation, 'ground');
+      console.log(`Physics ground updated to elevation: ${groundElevation.toFixed(0)}`);
+    }
 
     // Only add test road if no real roads loaded
     if (!this.roadGenerator || this.roadGenerator.roads.length === 0) {
@@ -917,17 +946,21 @@ export class Game {
     this.truck = new Truck(TruckTypes.STANDARD);
     this.testTruck = this.truck.getObject3D();
 
-    // Position truck at center of road network if roads are loaded
-    let startX = 0, startY = 2, startZ = 0;
-    if (this.roadGenerator && this.roadGenerator.roads.length > 0) {
-      const bounds = this.roadGenerator.getBounds();
-      startX = (bounds.minX + bounds.maxX) / 2;
-      startZ = (bounds.minZ + bounds.maxZ) / 2;
-      startY = 2; // Slightly above ground level
-      console.log(`Positioning truck at road center: (${startX.toFixed(0)}, ${startY.toFixed(0)}, ${startZ.toFixed(0)})`);
-    }
+    // Position truck using the same coordinates calculated above for ground
     this.testTruck.position.set(startX, startY, startZ);
+    console.log(`Truck positioned at: (${startX.toFixed(0)}, ${startY.toFixed(1)}, ${startZ.toFixed(0)})`);
     this.scene.add(this.testTruck);
+
+    // Position camera near the truck initially
+    this.camera.position.set(startX, startY + 10, startZ + 20);
+    this.camera.lookAt(startX, startY, startZ);
+
+    // Position sun light at truck location for proper lighting
+    if (this.sunLight) {
+      this.sunLight.position.set(startX + 50, startY + 100, startZ + 50);
+      this.sunLight.target.position.set(startX, startY, startZ);
+      this.sunLight.target.updateMatrixWorld();
+    }
 
     // Create physics body for truck
     const specs = this.truck.getSpecs();
@@ -938,8 +971,16 @@ export class Game {
       length: 9,
     });
 
-    // Add environment props
-    this.addEnvironmentProps();
+    // Trigger initial chunk loading at truck position
+    if (this.chunkManager) {
+      this.chunkManager.update(startX, startZ, true); // Force update
+      console.log('Initial chunk loading triggered at truck position');
+    }
+
+    // Add environment props only if no real roads loaded
+    if (!this.roadGenerator || this.roadGenerator.roads.length === 0) {
+      this.addEnvironmentProps();
+    }
   }
 
   /**
@@ -1204,6 +1245,14 @@ export class Game {
     // Update camera
     this.updateCamera(deltaTime);
 
+    // Update sun light position to follow truck for proper shadows
+    if (this.sunLight && this.testTruck) {
+      const truckPos = this.testTruck.position;
+      this.sunLight.position.set(truckPos.x + 50, truckPos.y + 100, truckPos.z + 50);
+      this.sunLight.target.position.copy(truckPos);
+      this.sunLight.target.updateMatrixWorld();
+    }
+
     // Update audio listener position (for 3D spatial audio)
     if (this.audio && this.audio.isInitialized() && this.camera) {
       // Get camera forward direction
@@ -1356,6 +1405,15 @@ export class Game {
     const steering = this.input.getSteeringInput();
     const handbrake = this.input.isHandbrakeActive();
 
+    // DEBUG: Log input once per second when there's input
+    if ((throttle > 0 || brake > 0 || steering !== 0) && !this._lastInputLog) {
+      console.log('Input received:', { throttle, brake, steering, handbrake });
+      this._lastInputLog = Date.now();
+    }
+    if (this._lastInputLog && Date.now() - this._lastInputLog > 1000) {
+      this._lastInputLog = null;
+    }
+
     // Physics constants (base values)
     let engineForce = 8000; // Newtons
     let brakeForce = 12000;
@@ -1378,15 +1436,25 @@ export class Game {
     const currentSpeed = velocity.length();
     this.truckSpeed = currentSpeed;
 
-    // Get forward direction from truck rotation
-    // The truck model is rotated 180° to face -Z, so forward is -Z in local space
+    // Get forward direction from truck rotation (Y-axis only, keep horizontal)
+    // Extract yaw rotation only to prevent force going vertical when truck tips
+    const euler = new THREE.Euler().setFromQuaternion(this.testTruck.quaternion, 'YXZ');
+    const yawOnly = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), euler.y);
     const forward = new THREE.Vector3(0, 0, -1);
-    forward.applyQuaternion(this.testTruck.quaternion);
+    forward.applyQuaternion(yawOnly);
 
     // Apply engine force (throttle)
     if (throttle > 0 && currentSpeed < maxSpeed) {
       const force = forward.clone().multiplyScalar(throttle * engineForce);
       this.physics.applyForce(this.truckBody, force);
+      // DEBUG: Log force application occasionally
+      if (!this._lastForceLog || Date.now() - this._lastForceLog > 2000) {
+        console.log('Applying force:', force.x.toFixed(0), force.y.toFixed(0), force.z.toFixed(0), 'Speed:', currentSpeed.toFixed(2));
+        console.log('Body velocity:', this.truckBody.velocity.x.toFixed(2), this.truckBody.velocity.y.toFixed(2), this.truckBody.velocity.z.toFixed(2));
+        console.log('Body position:', this.truckBody.position.x.toFixed(0), this.truckBody.position.y.toFixed(0), this.truckBody.position.z.toFixed(0));
+        console.log('Body mass:', this.truckBody.mass, 'Type:', this.truckBody.type);
+        this._lastForceLog = Date.now();
+      }
     }
 
     // Apply braking force

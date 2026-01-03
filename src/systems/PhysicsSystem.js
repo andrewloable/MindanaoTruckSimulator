@@ -177,8 +177,8 @@ export class PhysicsSystem {
       mass: mass,
       shape: chassisShape,
       material: this.materials.vehicle,
-      linearDamping: 0.1,
-      angularDamping: 0.5,
+      linearDamping: 0.3,
+      angularDamping: 0.95, // High damping to prevent flipping
       allowSleep: false, // Keep vehicle always active
     });
 
@@ -279,8 +279,11 @@ export class PhysicsSystem {
       const cannonPoint = new CANNON.Vec3(worldPoint.x, worldPoint.y, worldPoint.z);
       body.applyForce(cannonForce, cannonPoint);
     } else {
-      // Apply force at center of mass (relative point = origin)
-      body.applyForce(cannonForce, new CANNON.Vec3(0, 0, 0));
+      // Directly apply velocity change (tuned for feel)
+      const scale = 0.0002; // Reduced for smoother acceleration
+      body.velocity.x += cannonForce.x * scale;
+      // Don't add vertical velocity from forces
+      body.velocity.z += cannonForce.z * scale;
     }
   }
 

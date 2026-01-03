@@ -66,37 +66,14 @@ export class RoadGenerator {
    * Create materials for different road types
    */
   createMaterials() {
+    // DEBUG: Using bright colors and DoubleSide to verify roads are rendering
     return {
-      motorway: new THREE.MeshStandardMaterial({
-        color: 0x444444,
-        roughness: 0.9,
-        metalness: 0.0,
-      }),
-      trunk: new THREE.MeshStandardMaterial({
-        color: 0x3d3d3d,
-        roughness: 0.9,
-        metalness: 0.0,
-      }),
-      primary: new THREE.MeshStandardMaterial({
-        color: 0x363636,
-        roughness: 0.85,
-        metalness: 0.0,
-      }),
-      secondary: new THREE.MeshStandardMaterial({
-        color: 0x333333,
-        roughness: 0.85,
-        metalness: 0.0,
-      }),
-      tertiary: new THREE.MeshStandardMaterial({
-        color: 0x2d2d2d,
-        roughness: 0.8,
-        metalness: 0.0,
-      }),
-      default: new THREE.MeshStandardMaterial({
-        color: 0x333333,
-        roughness: 0.85,
-        metalness: 0.0,
-      }),
+      motorway: new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide }), // Red
+      trunk: new THREE.MeshBasicMaterial({ color: 0xff6600, side: THREE.DoubleSide }), // Orange
+      primary: new THREE.MeshBasicMaterial({ color: 0xffff00, side: THREE.DoubleSide }), // Yellow
+      secondary: new THREE.MeshBasicMaterial({ color: 0x00ff00, side: THREE.DoubleSide }), // Green
+      tertiary: new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide }), // Cyan
+      default: new THREE.MeshBasicMaterial({ color: 0xff00ff, side: THREE.DoubleSide }), // Magenta
     };
   }
 

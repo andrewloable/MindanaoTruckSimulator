@@ -20,7 +20,8 @@
       "WebSearch",
       "Bash(powershell -Command:*)",
       "Bash(taskkill /PID 3464 /F)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "WebFetch(domain:forum.babylonjs.com)"
     ]
   }
 }
