@@ -860,8 +860,17 @@ export class Game {
    * Add test scene elements for initial development
    */
   addTestScene() {
-    // Ground plane
-    const groundGeometry = new THREE.PlaneGeometry(500, 500);
+    // Determine world center - use road bounds if available
+    let worldCenterX = 0, worldCenterZ = 0;
+    if (this.roadGenerator && this.roadGenerator.roads.length > 0) {
+      const bounds = this.roadGenerator.getBounds();
+      worldCenterX = (bounds.minX + bounds.maxX) / 2;
+      worldCenterZ = (bounds.minZ + bounds.maxZ) / 2;
+      console.log(`World center set to road bounds: (${worldCenterX.toFixed(0)}, ${worldCenterZ.toFixed(0)})`);
+    }
+
+    // Ground plane - position at world center
+    const groundGeometry = new THREE.PlaneGeometry(2000, 2000);
     const groundMaterial = new THREE.MeshStandardMaterial({
       color: 0x3d5c3d, // Grass green
       roughness: 0.9,
@@ -869,41 +878,55 @@ export class Game {
     });
     const ground = new THREE.Mesh(groundGeometry, groundMaterial);
     ground.rotation.x = -Math.PI / 2;
+    ground.position.set(worldCenterX, 0, worldCenterZ);
     ground.receiveShadow = true;
     this.scene.add(ground);
 
-    // Test road strip
-    const roadGeometry = new THREE.PlaneGeometry(10, 200);
-    const roadMaterial = new THREE.MeshStandardMaterial({
-      color: 0x333333, // Asphalt gray
-      roughness: 0.8,
-      metalness: 0.1,
-    });
-    const road = new THREE.Mesh(roadGeometry, roadMaterial);
-    road.rotation.x = -Math.PI / 2;
-    road.position.y = 0.01;
-    road.receiveShadow = true;
-    this.scene.add(road);
+    // Only add test road if no real roads loaded
+    if (!this.roadGenerator || this.roadGenerator.roads.length === 0) {
+      // Test road strip
+      const roadGeometry = new THREE.PlaneGeometry(10, 200);
+      const roadMaterial = new THREE.MeshStandardMaterial({
+        color: 0x333333, // Asphalt gray
+        roughness: 0.8,
+        metalness: 0.1,
+      });
+      const road = new THREE.Mesh(roadGeometry, roadMaterial);
+      road.rotation.x = -Math.PI / 2;
+      road.position.y = 0.01;
+      road.receiveShadow = true;
+      this.scene.add(road);
 
-    // Road markings (center line)
-    const markingMaterial = new THREE.MeshStandardMaterial({
-      color: 0xFFFFFF,
-      roughness: 0.5,
-    });
-    for (let z = -95; z < 100; z += 8) {
-      const marking = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.2, 4),
-        markingMaterial
-      );
-      marking.rotation.x = -Math.PI / 2;
-      marking.position.set(0, 0.02, z);
-      this.scene.add(marking);
+      // Road markings (center line)
+      const markingMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFFFFFF,
+        roughness: 0.5,
+      });
+      for (let z = -95; z < 100; z += 8) {
+        const marking = new THREE.Mesh(
+          new THREE.PlaneGeometry(0.2, 4),
+          markingMaterial
+        );
+        marking.rotation.x = -Math.PI / 2;
+        marking.position.set(0, 0.02, z);
+        this.scene.add(marking);
+      }
     }
 
     // Create truck using new Truck class
     this.truck = new Truck(TruckTypes.STANDARD);
     this.testTruck = this.truck.getObject3D();
-    this.testTruck.position.set(0, 0, 0);
+
+    // Position truck at center of road network if roads are loaded
+    let startX = 0, startY = 2, startZ = 0;
+    if (this.roadGenerator && this.roadGenerator.roads.length > 0) {
+      const bounds = this.roadGenerator.getBounds();
+      startX = (bounds.minX + bounds.maxX) / 2;
+      startZ = (bounds.minZ + bounds.maxZ) / 2;
+      startY = 2; // Slightly above ground level
+      console.log(`Positioning truck at road center: (${startX.toFixed(0)}, ${startY.toFixed(0)}, ${startZ.toFixed(0)})`);
+    }
+    this.testTruck.position.set(startX, startY, startZ);
     this.scene.add(this.testTruck);
 
     // Create physics body for truck

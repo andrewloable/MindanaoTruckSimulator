@@ -18,7 +18,9 @@
       "Bash(node scripts/osm-process.js:*)",
       "Bash(go build:*)",
       "WebSearch",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(taskkill /PID 3464 /F)",
+      "Bash(git add:*)"
     ]
   }
 }

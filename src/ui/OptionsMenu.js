@@ -57,6 +57,8 @@ export class OptionsMenu {
         align-items: center;
         justify-content: center;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        z-index: 1001;
+        pointer-events: auto;
       }
       .options-menu__container {
         background: rgba(30, 30, 50, 0.95);
@@ -66,6 +68,7 @@ export class OptionsMenu {
         max-height: 80vh;
         overflow: hidden;
         box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+        pointer-events: auto;
       }
       .options-menu__header {
         display: flex;
@@ -171,6 +174,8 @@ export class OptionsMenu {
         background: rgba(255, 255, 255, 0.2);
         border-radius: 3px;
         outline: none;
+        cursor: pointer;
+        pointer-events: auto;
       }
       .options-menu__slider::-webkit-slider-thumb {
         -webkit-appearance: none;

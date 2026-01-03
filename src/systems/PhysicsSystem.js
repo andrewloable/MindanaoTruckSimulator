@@ -279,8 +279,8 @@ export class PhysicsSystem {
       const cannonPoint = new CANNON.Vec3(worldPoint.x, worldPoint.y, worldPoint.z);
       body.applyForce(cannonForce, cannonPoint);
     } else {
-      // Apply force at center of mass
-      body.applyForce(cannonForce, body.position);
+      // Apply force at center of mass (relative point = origin)
+      body.applyForce(cannonForce, new CANNON.Vec3(0, 0, 0));
     }
   }
 
