@@ -13,6 +13,7 @@ import { TerrainSystem } from '../world/TerrainSystem.js';
 import { RoadGenerator } from '../world/RoadGenerator.js';
 import { ChunkManager } from '../world/ChunkManager.js';
 import { PhysicsSystem } from '../systems/PhysicsSystem.js';
+import { TrafficSystem } from '../systems/TrafficSystem.js';
 import { AudioManager, AudioCategory, loadGameSounds, EngineAudio, HornAudio } from '../systems/AudioManager.js';
 import { FuelSystem } from '../systems/FuelSystem.js';
 import { MaintenanceSystem, TruckComponent } from '../systems/MaintenanceSystem.js';
@@ -69,6 +70,7 @@ export class Game {
     this.fuelSystem = null;
     this.maintenanceSystem = null;
     this.chunkManager = null;
+    this.trafficSystem = null;
 
     // Game state
     this.gameState = 'menu'; // menu, playing, paused
@@ -525,6 +527,10 @@ export class Game {
         if (this.jobSystem) {
           this.jobSystem.init(this.roadGenerator.pois, this.pathfinder);
         }
+
+        // Initialize traffic system
+        this.trafficSystem = new TrafficSystem(this.scene);
+        this.trafficSystem.init(this.roadGenerator.roads);
       }
     } catch (error) {
       console.log('No road data available yet. Run npm run osm:download && npm run osm:process');
@@ -1126,6 +1132,11 @@ export class Game {
         this.testTruck.position.x,
         this.testTruck.position.z
       );
+    }
+
+    // Update AI traffic
+    if (this.trafficSystem && this.testTruck) {
+      this.trafficSystem.update(deltaTime, this.testTruck.position);
     }
 
     // Update job system

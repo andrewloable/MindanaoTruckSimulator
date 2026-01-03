@@ -7,7 +7,7 @@
 
 import { AudioCategory } from './AudioManager.js';
 
-// Radio station definitions
+// Radio station definitions with actual audio files
 export const RadioStations = {
   OFF: {
     id: 'off',
@@ -21,9 +21,8 @@ export const RadioStations = {
     genre: 'Relaxing',
     description: 'Smooth beats for the long road',
     tracks: [
-      { name: 'Coastal Breeze', duration: 180 },
-      { name: 'Mountain Vista', duration: 210 },
-      { name: 'Sunset Drive', duration: 195 },
+      { id: 'march_pixels', name: 'March of Pixels', file: '/audio/radio/march_of_pixels.mp3', duration: 100 },
+      { id: 'march_pixels_cover', name: 'March of Pixels (Cover)', file: '/audio/radio/march_of_pixels_cover.mp3', duration: 103 },
     ],
   },
   ROCK: {
@@ -32,9 +31,8 @@ export const RadioStations = {
     genre: 'Rock',
     description: 'Classic rock for truckers',
     tracks: [
-      { name: 'Highway Rider', duration: 200 },
-      { name: 'Steel Wheels', duration: 185 },
-      { name: 'Road Warrior', duration: 220 },
+      { id: 'marching_forward', name: 'Marching Forward', file: '/audio/radio/marching_forward.mp3', duration: 70 },
+      { id: 'marching_forward_alt', name: 'Marching Forward (Alt)', file: '/audio/radio/marching_forward_alt.mp3', duration: 111 },
     ],
   },
   POP: {
@@ -43,9 +41,8 @@ export const RadioStations = {
     genre: 'Pop',
     description: 'Today\'s hottest tracks',
     tracks: [
-      { name: 'Summer Nights', duration: 190 },
-      { name: 'Feel Good', duration: 175 },
-      { name: 'On The Road', duration: 205 },
+      { id: 'march_pixels_pop', name: 'March of Pixels', file: '/audio/radio/march_of_pixels_cover.mp3', duration: 103 },
+      { id: 'marching_pop', name: 'Marching Forward', file: '/audio/radio/marching_forward.mp3', duration: 70 },
     ],
   },
   LOCAL: {
@@ -54,9 +51,8 @@ export const RadioStations = {
     genre: 'OPM/Local',
     description: 'Local Mindanao music',
     tracks: [
-      { name: 'Dabaw City Nights', duration: 215 },
-      { name: 'Island Rhythm', duration: 188 },
-      { name: 'Tropical Dreams', duration: 200 },
+      { id: 'local1', name: 'March of Pixels', file: '/audio/radio/march_of_pixels.mp3', duration: 100 },
+      { id: 'local2', name: 'Marching Forward', file: '/audio/radio/marching_forward_alt.mp3', duration: 111 },
     ],
   },
 };
@@ -70,9 +66,16 @@ export class RadioSystem {
     this.currentTrackIndex = 0;
     this.isPlaying = false;
 
-    // Simulated playback (no actual audio files yet)
-    this.simulatedTime = 0;
+    // Audio playback
+    this.currentAudio = null;
+    this.audioContext = null;
+    this.gainNode = null;
+    this.sourceNode = null;
+    this.loadedBuffers = new Map();
+
+    // Track timing
     this.trackStartTime = 0;
+    this.pausedAt = 0;
 
     // Event callbacks
     this.onStationChange = null;
@@ -86,13 +89,55 @@ export class RadioSystem {
       RadioStations.LOCAL,
     ];
     this.stationIndex = -1; // -1 = OFF
+
+    // Volume
+    this.volume = 0.5;
   }
 
   /**
    * Initialize the radio system
    */
-  init() {
-    console.log('RadioSystem initialized');
+  async init() {
+    // Create audio context for radio playback
+    try {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.gainNode = this.audioContext.createGain();
+      this.gainNode.connect(this.audioContext.destination);
+      this.gainNode.gain.value = this.volume;
+
+      // Preload some tracks
+      await this.preloadStationTracks(RadioStations.CHILL);
+
+      console.log('RadioSystem initialized with audio playback');
+    } catch (error) {
+      console.warn('RadioSystem: Web Audio API not available', error);
+    }
+  }
+
+  /**
+   * Preload tracks for a station
+   * @param {Object} station
+   */
+  async preloadStationTracks(station) {
+    if (!station.tracks || !this.audioContext) return;
+
+    for (const track of station.tracks) {
+      if (this.loadedBuffers.has(track.id)) continue;
+
+      try {
+        const response = await fetch(track.file);
+        if (!response.ok) continue;
+
+        const arrayBuffer = await response.arrayBuffer();
+        const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+        this.loadedBuffers.set(track.id, audioBuffer);
+
+        // Update duration from actual file
+        track.duration = Math.floor(audioBuffer.duration);
+      } catch (error) {
+        console.warn(`Failed to load track: ${track.name}`, error);
+      }
+    }
   }
 
   /**
@@ -119,35 +164,108 @@ export class RadioSystem {
    */
   getTrackProgress() {
     const track = this.getCurrentTrack();
-    if (!track) return 0;
+    if (!track || !this.audioContext) return 0;
 
-    const elapsed = this.simulatedTime - this.trackStartTime;
+    if (!this.isPlaying) return this.pausedAt / track.duration;
+
+    const elapsed = this.audioContext.currentTime - this.trackStartTime;
     return Math.min(1, elapsed / track.duration);
+  }
+
+  /**
+   * Play a track
+   * @param {Object} track
+   */
+  async playTrack(track) {
+    if (!this.audioContext) return;
+
+    // Stop current playback
+    this.stopPlayback();
+
+    // Resume context if suspended
+    if (this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+
+    // Get buffer (load if needed)
+    let buffer = this.loadedBuffers.get(track.id);
+    if (!buffer) {
+      try {
+        const response = await fetch(track.file);
+        const arrayBuffer = await response.arrayBuffer();
+        buffer = await this.audioContext.decodeAudioData(arrayBuffer);
+        this.loadedBuffers.set(track.id, buffer);
+        track.duration = Math.floor(buffer.duration);
+      } catch (error) {
+        console.warn(`Failed to load track: ${track.name}`, error);
+        return;
+      }
+    }
+
+    // Create source
+    this.sourceNode = this.audioContext.createBufferSource();
+    this.sourceNode.buffer = buffer;
+    this.sourceNode.loop = false;
+    this.sourceNode.connect(this.gainNode);
+
+    // Track end callback
+    this.sourceNode.onended = () => {
+      if (this.isPlaying) {
+        this.nextTrack();
+      }
+    };
+
+    // Start playback
+    this.sourceNode.start(0);
+    this.trackStartTime = this.audioContext.currentTime;
+    this.isPlaying = true;
+
+    console.log(`Now playing: ${track.name}`);
+
+    if (this.onTrackChange) {
+      this.onTrackChange(track);
+    }
+  }
+
+  /**
+   * Stop current playback
+   */
+  stopPlayback() {
+    if (this.sourceNode) {
+      try {
+        this.sourceNode.onended = null;
+        this.sourceNode.stop();
+      } catch (e) {
+        // Already stopped
+      }
+      this.sourceNode = null;
+    }
   }
 
   /**
    * Tune to a specific station
    * @param {Object} station - Station object from RadioStations
    */
-  tuneStation(station) {
+  async tuneStation(station) {
     if (this.currentStation === station) return;
 
+    this.stopPlayback();
     this.currentStation = station;
     this.currentTrackIndex = 0;
-    this.trackStartTime = this.simulatedTime;
 
     if (station === RadioStations.OFF) {
       this.isPlaying = false;
       this.stationIndex = -1;
       console.log('Radio: OFF');
     } else {
-      this.isPlaying = true;
       this.stationIndex = this.stations.indexOf(station);
       console.log(`Radio: ${station.name} - ${station.description}`);
 
+      // Preload and play first track
+      await this.preloadStationTracks(station);
       const track = this.getCurrentTrack();
       if (track) {
-        console.log(`Now playing: ${track.name}`);
+        await this.playTrack(track);
       }
     }
 
@@ -159,20 +277,20 @@ export class RadioSystem {
   /**
    * Tune to next station
    */
-  nextStation() {
+  async nextStation() {
     this.stationIndex++;
     if (this.stationIndex >= this.stations.length) {
       // Wrap to OFF
-      this.tuneStation(RadioStations.OFF);
+      await this.tuneStation(RadioStations.OFF);
     } else {
-      this.tuneStation(this.stations[this.stationIndex]);
+      await this.tuneStation(this.stations[this.stationIndex]);
     }
   }
 
   /**
    * Tune to previous station
    */
-  prevStation() {
+  async prevStation() {
     if (this.stationIndex < 0) {
       // From OFF, go to last station
       this.stationIndex = this.stations.length - 1;
@@ -181,42 +299,59 @@ export class RadioSystem {
     }
 
     if (this.stationIndex < 0) {
-      this.tuneStation(RadioStations.OFF);
+      await this.tuneStation(RadioStations.OFF);
     } else {
-      this.tuneStation(this.stations[this.stationIndex]);
+      await this.tuneStation(this.stations[this.stationIndex]);
     }
   }
 
   /**
    * Toggle radio on/off
    */
-  toggle() {
+  async toggle() {
     if (this.currentStation === RadioStations.OFF) {
       // Turn on - tune to first station
       this.stationIndex = 0;
-      this.tuneStation(this.stations[0]);
+      await this.tuneStation(this.stations[0]);
     } else {
       // Turn off
-      this.tuneStation(RadioStations.OFF);
+      await this.tuneStation(RadioStations.OFF);
     }
   }
 
   /**
    * Skip to next track
    */
-  nextTrack() {
+  async nextTrack() {
     if (this.currentStation === RadioStations.OFF) return;
     if (!this.currentStation.tracks.length) return;
 
+    this.stopPlayback();
     this.currentTrackIndex = (this.currentTrackIndex + 1) % this.currentStation.tracks.length;
-    this.trackStartTime = this.simulatedTime;
 
     const track = this.getCurrentTrack();
-    console.log(`Now playing: ${track.name}`);
-
-    if (this.onTrackChange) {
-      this.onTrackChange(track);
+    if (track) {
+      await this.playTrack(track);
     }
+  }
+
+  /**
+   * Set volume
+   * @param {number} volume - 0 to 1
+   */
+  setVolume(volume) {
+    this.volume = Math.max(0, Math.min(1, volume));
+    if (this.gainNode) {
+      this.gainNode.gain.value = this.volume;
+    }
+  }
+
+  /**
+   * Get volume
+   * @returns {number}
+   */
+  getVolume() {
+    return this.volume;
   }
 
   /**
@@ -224,18 +359,8 @@ export class RadioSystem {
    * @param {number} deltaTime - Time since last frame in seconds
    */
   update(deltaTime) {
-    if (!this.isPlaying) return;
-
-    this.simulatedTime += deltaTime;
-
-    // Check if current track ended
-    const track = this.getCurrentTrack();
-    if (track) {
-      const elapsed = this.simulatedTime - this.trackStartTime;
-      if (elapsed >= track.duration) {
-        this.nextTrack();
-      }
-    }
+    // Track progress is handled by Web Audio API
+    // onended callback handles track transitions
   }
 
   /**
@@ -244,9 +369,9 @@ export class RadioSystem {
    */
   getFormattedTime() {
     const track = this.getCurrentTrack();
-    if (!track) return '--:--';
+    if (!track || !this.audioContext) return '--:--';
 
-    const elapsed = Math.floor(this.simulatedTime - this.trackStartTime);
+    const elapsed = Math.floor(this.audioContext.currentTime - this.trackStartTime);
     const minutes = Math.floor(elapsed / 60);
     const seconds = elapsed % 60;
 
@@ -273,5 +398,16 @@ export class RadioSystem {
    */
   getStations() {
     return this.stations;
+  }
+
+  /**
+   * Dispose of resources
+   */
+  dispose() {
+    this.stopPlayback();
+    if (this.audioContext) {
+      this.audioContext.close();
+    }
+    this.loadedBuffers.clear();
   }
 }
