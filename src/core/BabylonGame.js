@@ -109,9 +109,11 @@ export class BabylonGame {
 
     updateLoadingProgress(25);
 
-    // Initialize Havok physics
+    // Initialize Havok physics with explicit WASM path
     console.log('Loading Havok physics...');
-    this.havokInstance = await HavokPhysics();
+    this.havokInstance = await HavokPhysics({
+      locateFile: () => '/HavokPhysics.wasm'
+    });
     console.log('Havok physics loaded');
 
     updateLoadingProgress(35);

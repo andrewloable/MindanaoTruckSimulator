@@ -2,14 +2,56 @@
  * Garage - View owned trucks and purchase new ones
  *
  * Features:
- * - 3D truck preview with rotation
  * - Truck statistics display
  * - Dealership with available trucks
  * - Purchase confirmation dialog
  */
 
-import * as THREE from 'three';
-import { Truck, TruckTypes } from '../vehicles/Truck.js';
+// Truck configurations (moved from vehicles/Truck.js)
+export const TruckTypes = {
+  STANDARD: {
+    id: 'standard',
+    name: 'Mindanao Hauler',
+    description: 'Reliable workhorse for any cargo',
+    price: 0,
+    color: '#4CAF50',
+    specs: {
+      mass: 8000,
+      enginePower: 350,
+      maxSpeed: 90,
+      fuelCapacity: 300,
+      fuelEfficiency: 3,
+    },
+  },
+  HEAVY: {
+    id: 'heavy',
+    name: 'Davao Titan',
+    description: 'Heavy-duty truck for maximum cargo',
+    price: 150000,
+    color: '#1565C0',
+    specs: {
+      mass: 12000,
+      enginePower: 450,
+      maxSpeed: 80,
+      fuelCapacity: 400,
+      fuelEfficiency: 2.5,
+    },
+  },
+  FAST: {
+    id: 'fast',
+    name: 'Island Express',
+    description: 'Fast delivery truck for time-sensitive cargo',
+    price: 200000,
+    color: '#D32F2F',
+    specs: {
+      mass: 6000,
+      enginePower: 400,
+      maxSpeed: 110,
+      fuelCapacity: 250,
+      fuelEfficiency: 2.8,
+    },
+  },
+};
 
 export class Garage {
   constructor(uiManager) {
@@ -17,22 +59,8 @@ export class Garage {
     this.element = null;
     this.isVisible = false;
 
-    // 3D Preview
-    this.previewScene = null;
-    this.previewCamera = null;
-    this.previewRenderer = null;
-    this.previewTruck = null;
-    this.previewCanvas = null;
-    this.animationId = null;
-
-    // Preview rotation
-    this.autoRotate = true;
-    this.rotationY = 0;
-    this.isDragging = false;
-    this.lastMouseX = 0;
-
     // State
-    this.ownedTrucks = ['standard']; // Player starts with standard truck
+    this.ownedTrucks = ['standard'];
     this.activeTruckId = 'standard';
     this.selectedTruckId = 'standard';
     this.playerMoney = 0;
@@ -42,19 +70,12 @@ export class Garage {
     this.onSelectTruck = null;
   }
 
-  /**
-   * Initialize the garage
-   */
   init() {
     this.element = this.createElement();
     this.uiManager.registerScreen('garage', this.element);
     this.addStyles();
-    this.setupPreview();
   }
 
-  /**
-   * Add CSS styles
-   */
   addStyles() {
     if (document.getElementById('garage-styles')) return;
 
@@ -72,6 +93,7 @@ export class Garage {
         flex-direction: column;
         color: white;
         font-family: 'Segoe UI', system-ui, sans-serif;
+        z-index: 1000;
       }
 
       .garage__header {
@@ -116,28 +138,18 @@ export class Garage {
         position: relative;
       }
 
-      .garage__preview-canvas {
-        width: 100%;
-        max-width: 600px;
-        aspect-ratio: 16/10;
+      .garage__truck-preview {
+        width: 300px;
+        height: 200px;
         border-radius: 12px;
-        background: rgba(0, 0, 0, 0.3);
-        cursor: grab;
-      }
-
-      .garage__preview-canvas:active {
-        cursor: grabbing;
-      }
-
-      .garage__preview-hint {
-        position: absolute;
-        bottom: 30px;
-        font-size: 12px;
-        color: rgba(255, 255, 255, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 100px;
+        margin-bottom: 20px;
       }
 
       .garage__truck-info {
-        margin-top: 20px;
         text-align: center;
       }
 
@@ -350,7 +362,7 @@ export class Garage {
         display: flex;
         align-items: center;
         justify-content: center;
-        z-index: 1000;
+        z-index: 1001;
       }
 
       .garage__dialog-content {
@@ -381,9 +393,6 @@ export class Garage {
     document.head.appendChild(style);
   }
 
-  /**
-   * Create the garage element
-   */
   createElement() {
     const container = document.createElement('div');
     container.className = 'garage';
@@ -419,14 +428,10 @@ export class Garage {
     const preview = document.createElement('div');
     preview.className = 'garage__preview';
 
-    this.previewCanvas = document.createElement('canvas');
-    this.previewCanvas.className = 'garage__preview-canvas';
-    preview.appendChild(this.previewCanvas);
-
-    const hint = document.createElement('div');
-    hint.className = 'garage__preview-hint';
-    hint.textContent = 'Drag to rotate';
-    preview.appendChild(hint);
+    this.truckPreview = document.createElement('div');
+    this.truckPreview.className = 'garage__truck-preview';
+    this.truckPreview.textContent = '🚛';
+    preview.appendChild(this.truckPreview);
 
     this.truckInfo = document.createElement('div');
     this.truckInfo.className = 'garage__truck-info';
@@ -438,7 +443,6 @@ export class Garage {
     const sidebar = document.createElement('div');
     sidebar.className = 'garage__sidebar';
 
-    // Stats section
     const statsTitle = document.createElement('div');
     statsTitle.className = 'garage__section-title';
     statsTitle.textContent = 'Specifications';
@@ -448,7 +452,6 @@ export class Garage {
     this.statsContainer.className = 'garage__stats';
     sidebar.appendChild(this.statsContainer);
 
-    // Trucks section
     const trucksTitle = document.createElement('div');
     trucksTitle.className = 'garage__section-title';
     trucksTitle.textContent = 'Available Trucks';
@@ -458,7 +461,6 @@ export class Garage {
     this.trucksContainer.className = 'garage__trucks';
     sidebar.appendChild(this.trucksContainer);
 
-    // Actions
     this.actionsContainer = document.createElement('div');
     this.actionsContainer.className = 'garage__actions';
     sidebar.appendChild(this.actionsContainer);
@@ -473,7 +475,6 @@ export class Garage {
     closeBtn.addEventListener('click', () => this.hide());
     container.appendChild(closeBtn);
 
-    // Populate trucks list
     this.populateTrucksList();
     this.updateTruckInfo();
     this.updateStats();
@@ -482,131 +483,12 @@ export class Garage {
     return container;
   }
 
-  /**
-   * Setup 3D preview
-   */
-  setupPreview() {
-    const width = 600;
-    const height = 375;
-
-    // Scene
-    this.previewScene = new THREE.Scene();
-    this.previewScene.background = new THREE.Color(0x1a1a2e);
-
-    // Camera
-    this.previewCamera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-    this.previewCamera.position.set(6, 4, 8);
-    this.previewCamera.lookAt(0, 1, 0);
-
-    // Renderer
-    this.previewRenderer = new THREE.WebGLRenderer({
-      canvas: this.previewCanvas,
-      antialias: true,
-    });
-    this.previewRenderer.setSize(width, height);
-    this.previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-
-    // Lights
-    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-    this.previewScene.add(ambient);
-
-    const directional = new THREE.DirectionalLight(0xffffff, 0.8);
-    directional.position.set(5, 10, 5);
-    this.previewScene.add(directional);
-
-    const fill = new THREE.DirectionalLight(0x8888ff, 0.3);
-    fill.position.set(-5, 5, -5);
-    this.previewScene.add(fill);
-
-    // Ground
-    const groundGeometry = new THREE.CircleGeometry(8, 32);
-    const groundMaterial = new THREE.MeshStandardMaterial({
-      color: 0x222233,
-      roughness: 0.9,
-    });
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.y = 0;
-    this.previewScene.add(ground);
-
-    // Create initial truck
-    this.updatePreviewTruck();
-
-    // Mouse interaction for rotation
-    this.previewCanvas.addEventListener('mousedown', (e) => {
-      this.isDragging = true;
-      this.lastMouseX = e.clientX;
-      this.autoRotate = false;
-    });
-
-    document.addEventListener('mousemove', (e) => {
-      if (this.isDragging) {
-        const deltaX = e.clientX - this.lastMouseX;
-        this.rotationY += deltaX * 0.01;
-        this.lastMouseX = e.clientX;
-      }
-    });
-
-    document.addEventListener('mouseup', () => {
-      this.isDragging = false;
-    });
-  }
-
-  /**
-   * Update the preview truck
-   */
-  updatePreviewTruck() {
-    // Remove old truck
-    if (this.previewTruck) {
-      this.previewScene.remove(this.previewTruck.getObject3D());
-      this.previewTruck.dispose();
-    }
-
-    // Get truck type
-    const truckType = Object.values(TruckTypes).find(t => t.id === this.selectedTruckId);
-    if (!truckType) return;
-
-    // Create new truck
-    this.previewTruck = new Truck(truckType);
-    this.previewScene.add(this.previewTruck.getObject3D());
-
-    // Handle async GLB loading
-    this.previewTruck.onLoad(() => {
-      this.previewTruck.setHeadlights(true);
-    });
-  }
-
-  /**
-   * Animation loop for preview
-   */
-  animatePreview() {
-    if (!this.isVisible) return;
-
-    this.animationId = requestAnimationFrame(() => this.animatePreview());
-
-    if (this.autoRotate) {
-      this.rotationY += 0.005;
-    }
-
-    if (this.previewTruck) {
-      this.previewTruck.getObject3D().rotation.y = this.rotationY;
-    }
-
-    this.previewRenderer.render(this.previewScene, this.previewCamera);
-  }
-
-  /**
-   * Clear all children from an element
-   */
   clearElement(element) {
     while (element.firstChild) {
       element.removeChild(element.firstChild);
     }
   }
 
-  /**
-   * Populate the trucks list
-   */
   populateTrucksList() {
     this.clearElement(this.trucksContainer);
 
@@ -651,27 +533,23 @@ export class Garage {
     }
   }
 
-  /**
-   * Select a truck
-   */
   selectTruck(truckId) {
     this.selectedTruckId = truckId;
-    this.updatePreviewTruck();
     this.updateTruckInfo();
     this.updateStats();
     this.updateActions();
     this.populateTrucksList();
   }
 
-  /**
-   * Update truck info display
-   */
   updateTruckInfo() {
     const truckType = Object.values(TruckTypes).find(t => t.id === this.selectedTruckId);
     if (!truckType) return;
 
     const isOwned = this.ownedTrucks.includes(truckType.id);
     const isActive = truckType.id === this.activeTruckId;
+
+    // Update preview color
+    this.truckPreview.style.backgroundColor = truckType.color;
 
     this.clearElement(this.truckInfo);
 
@@ -702,9 +580,6 @@ export class Garage {
     this.truckInfo.appendChild(price);
   }
 
-  /**
-   * Update stats display
-   */
   updateStats() {
     const truckType = Object.values(TruckTypes).find(t => t.id === this.selectedTruckId);
     if (!truckType) return;
@@ -746,9 +621,6 @@ export class Garage {
     }
   }
 
-  /**
-   * Update action buttons
-   */
   updateActions() {
     const truckType = Object.values(TruckTypes).find(t => t.id === this.selectedTruckId);
     if (!truckType) return;
@@ -789,9 +661,6 @@ export class Garage {
     this.actionsContainer.appendChild(closeBtn);
   }
 
-  /**
-   * Show purchase confirmation dialog
-   */
   confirmPurchase(truckType) {
     const dialog = document.createElement('div');
     dialog.className = 'garage__dialog';
@@ -806,29 +675,12 @@ export class Garage {
 
     const message = document.createElement('div');
     message.className = 'garage__dialog-message';
-
-    const line1 = document.createElement('div');
-    line1.textContent = 'You are about to purchase the ';
-    const truckNameBold = document.createElement('strong');
-    truckNameBold.textContent = truckType.name;
-    line1.appendChild(truckNameBold);
-    line1.appendChild(document.createTextNode(' for '));
-    const priceBold = document.createElement('strong');
-    priceBold.textContent = '\u20B1 ' + truckType.price.toLocaleString();
-    line1.appendChild(priceBold);
-    line1.appendChild(document.createTextNode('.'));
-    message.appendChild(line1);
-
-    message.appendChild(document.createElement('br'));
-    message.appendChild(document.createElement('br'));
-
-    const line2 = document.createElement('div');
-    line2.textContent = 'Remaining balance: ';
-    const remainingBold = document.createElement('strong');
-    remainingBold.textContent = '\u20B1 ' + (this.playerMoney - truckType.price).toLocaleString();
-    line2.appendChild(remainingBold);
-    message.appendChild(line2);
-
+    message.innerHTML = `
+      You are about to purchase the <strong>${truckType.name}</strong>
+      for <strong>\u20B1 ${truckType.price.toLocaleString()}</strong>.
+      <br><br>
+      Remaining balance: <strong>\u20B1 ${(this.playerMoney - truckType.price).toLocaleString()}</strong>
+    `;
     content.appendChild(message);
 
     const actions = document.createElement('div');
@@ -854,16 +706,12 @@ export class Garage {
     this.element.appendChild(dialog);
   }
 
-  /**
-   * Purchase a truck
-   */
   purchaseTruck(truckType) {
     if (this.playerMoney < truckType.price) return;
 
     this.playerMoney -= truckType.price;
     this.ownedTrucks.push(truckType.id);
 
-    // Notify game
     if (this.onPurchase) {
       this.onPurchase(truckType.id, truckType.price);
     }
@@ -874,9 +722,6 @@ export class Garage {
     this.updateActions();
   }
 
-  /**
-   * Set active truck
-   */
   setActiveTruck(truckId) {
     this.activeTruckId = truckId;
 
@@ -888,9 +733,6 @@ export class Garage {
     this.updateActions();
   }
 
-  /**
-   * Update balance display
-   */
   updateBalance(amount) {
     this.playerMoney = amount;
     if (this.balanceValue) {
@@ -899,71 +741,23 @@ export class Garage {
     this.updateActions();
   }
 
-  /**
-   * Set owned trucks
-   */
-  setOwnedTrucks(trucks) {
-    this.ownedTrucks = trucks;
-    this.populateTrucksList();
-    this.updateTruckInfo();
-    this.updateActions();
-  }
-
-  /**
-   * Set active truck ID
-   */
-  setActiveTruckId(truckId) {
-    this.activeTruckId = truckId;
-    this.selectedTruckId = truckId;
-    this.updatePreviewTruck();
-    this.populateTrucksList();
-    this.updateTruckInfo();
-    this.updateActions();
-  }
-
-  /**
-   * Show the garage
-   */
   show() {
     this.element.style.display = 'flex';
     this.isVisible = true;
-    this.autoRotate = true;
-    this.animatePreview();
     this.uiManager.showScreen('garage');
   }
 
-  /**
-   * Hide the garage
-   */
   hide() {
     this.element.style.display = 'none';
     this.isVisible = false;
-    if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
-    }
     this.uiManager.hideScreen('garage');
   }
 
-  /**
-   * Toggle visibility
-   */
   toggle() {
     if (this.isVisible) {
       this.hide();
     } else {
       this.show();
-    }
-  }
-
-  /**
-   * Dispose resources
-   */
-  dispose() {
-    if (this.previewTruck) {
-      this.previewTruck.dispose();
-    }
-    if (this.previewRenderer) {
-      this.previewRenderer.dispose();
     }
   }
 }
