@@ -173,6 +173,7 @@ export class PhysicsSystem {
       material: this.materials.vehicle,
       linearDamping: 0.1,
       angularDamping: 0.5,
+      allowSleep: false, // Keep vehicle always active
     });
 
     // Set initial position
@@ -227,13 +228,19 @@ export class PhysicsSystem {
    * @param {THREE.Vector3} [worldPoint] - Point to apply force at (optional)
    */
   applyForce(body, force, worldPoint = null) {
+    // Wake up the body if it's sleeping
+    if (body.sleepState === CANNON.Body.SLEEPING) {
+      body.wakeUp();
+    }
+
     const cannonForce = new CANNON.Vec3(force.x, force.y, force.z);
 
     if (worldPoint) {
       const cannonPoint = new CANNON.Vec3(worldPoint.x, worldPoint.y, worldPoint.z);
       body.applyForce(cannonForce, cannonPoint);
     } else {
-      body.applyForce(cannonForce);
+      // Apply force at center of mass
+      body.applyForce(cannonForce, body.position);
     }
   }
 
@@ -291,8 +298,9 @@ export class PhysicsSystem {
     for (const [bodyId, mesh] of this.meshes) {
       const body = this.world.bodies.find(b => b.id === bodyId);
       if (body) {
-        mesh.position.copy(body.position);
-        mesh.quaternion.copy(body.quaternion);
+        // Manually copy values from Cannon.js Vec3/Quaternion to Three.js
+        mesh.position.set(body.position.x, body.position.y, body.position.z);
+        mesh.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
       }
     }
   }

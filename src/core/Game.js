@@ -566,7 +566,7 @@ export class Game {
       this.engineAudio.start();
     }
 
-    console.log('Game started - WASD to drive! Press J for Jobs, R for Radio, H for Horn');
+    console.log('Game started - WASD to drive, ESC to pause');
   }
 
   /**
@@ -660,7 +660,7 @@ export class Game {
       this.playerMoney -= result.cost;
       if (this.hud) {
         this.hud.setMoney(this.playerMoney);
-        this.hud.setFuel(this.fuelSystem.getFuelPercent());
+        this.hud.setFuel(this.fuelSystem.getFuelPercent() * 100);
       }
     }
   }
@@ -1279,9 +1279,9 @@ export class Game {
       this.hud.setTime(this.skySystem.timeOfDay);
     }
 
-    // Update fuel from fuel system
+    // Update fuel from fuel system (getFuelPercent returns 0-1, setFuel expects 0-100)
     if (this.fuelSystem) {
-      this.hud.setFuel(this.fuelSystem.getFuelPercent());
+      this.hud.setFuel(this.fuelSystem.getFuelPercent() * 100);
     }
 
     // Update GPS location from truck position

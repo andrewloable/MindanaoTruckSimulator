@@ -41,6 +41,8 @@ export class PauseMenu {
         align-items: center;
         justify-content: center;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        z-index: 1000;
+        pointer-events: auto;
       }
       .pause-menu__content {
         display: flex;
@@ -71,6 +73,9 @@ export class PauseMenu {
         transition: all 0.2s ease;
         text-transform: uppercase;
         letter-spacing: 1px;
+        pointer-events: auto;
+        position: relative;
+        z-index: 1;
       }
       .pause-menu__btn--primary {
         background: linear-gradient(135deg, #4CAF50, #8BC34A);
