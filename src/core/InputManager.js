@@ -33,6 +33,7 @@ export const InputAction = {
   RADIO_PREV: 'radioPrev',
   REFUEL: 'refuel',
   WEATHER_CYCLE: 'weatherCycle',
+  REPAIR: 'repair',
 };
 
 // Default gamepad button/axis mappings (standard gamepad layout)
@@ -112,6 +113,7 @@ const DEFAULT_KEY_BINDINGS = {
   'BracketLeft': InputAction.RADIO_PREV,
   'KeyF': InputAction.REFUEL,
   'KeyP': InputAction.WEATHER_CYCLE,
+  'KeyN': InputAction.REPAIR,
 };
 
 export class InputManager {

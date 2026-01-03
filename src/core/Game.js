@@ -11,9 +11,11 @@ import { SkySystem } from '../world/SkySystem.js';
 import { WeatherSystem } from '../world/WeatherSystem.js';
 import { TerrainSystem } from '../world/TerrainSystem.js';
 import { RoadGenerator } from '../world/RoadGenerator.js';
+import { ChunkManager } from '../world/ChunkManager.js';
 import { PhysicsSystem } from '../systems/PhysicsSystem.js';
 import { AudioManager, AudioCategory, loadGameSounds, EngineAudio, HornAudio } from '../systems/AudioManager.js';
 import { FuelSystem } from '../systems/FuelSystem.js';
+import { MaintenanceSystem, TruckComponent } from '../systems/MaintenanceSystem.js';
 import { Notification } from '../ui/Notification.js';
 import { UIManager } from '../ui/UIManager.js';
 import { MainMenu } from '../ui/MainMenu.js';
@@ -65,6 +67,8 @@ export class Game {
     this.engineAudio = null;
     this.hornAudio = null;
     this.fuelSystem = null;
+    this.maintenanceSystem = null;
+    this.chunkManager = null;
 
     // Game state
     this.gameState = 'menu'; // menu, playing, paused
@@ -265,6 +269,11 @@ export class Game {
       this.tryRefuel();
     });
 
+    // Repair
+    this.input.onAction(InputAction.REPAIR, () => {
+      this.tryRepair();
+    });
+
     // Weather cycle (for testing)
     this.input.onAction(InputAction.WEATHER_CYCLE, () => {
       if (this.weatherSystem) {
@@ -398,6 +407,44 @@ export class Game {
       }
     };
 
+    // Create Maintenance System
+    this.maintenanceSystem = new MaintenanceSystem();
+    this.maintenanceSystem.onComponentCritical = (component, condition) => {
+      if (this.notification) {
+        const names = {
+          engine: 'Engine',
+          tires: 'Tires',
+          brakes: 'Brakes',
+          body: 'Body',
+          transmission: 'Transmission',
+        };
+        this.notification.show({
+          type: 'error',
+          title: 'Critical Damage',
+          message: `${names[component] || component} is critically damaged! Find a service station.`,
+          icon: '\u26A0',
+          duration: 6000,
+        });
+      }
+    };
+    this.maintenanceSystem.onServiceAvailable = (station) => {
+      if (this.maintenanceSystem.needsRepair() && this.notification) {
+        this.notification.show({
+          type: 'info',
+          title: 'Service Station',
+          message: 'Press N to repair',
+          icon: '\uD83D\uDD27',
+          duration: 3000,
+        });
+      }
+    };
+    this.maintenanceSystem.onRepairComplete = (component, cost) => {
+      if (this.notification) {
+        const message = component === 'all' ? 'Full service complete' : `${component} repaired`;
+        this.notification.showMoneySpent(cost, message);
+      }
+    };
+
     // Show main menu initially
     this.mainMenu.show();
   }
@@ -429,9 +476,30 @@ export class Game {
     try {
       const roadsLoaded = await this.roadGenerator.loadRoads('/data/processed/roads.json');
       if (roadsLoaded) {
-        this.roadGenerator.generateRoads();
         await this.roadGenerator.loadPOIs('/data/processed/pois.json');
-        this.roadGenerator.createPOIMarkers();
+
+        // Check if we should use chunk streaming (for large worlds)
+        const bounds = this.roadGenerator.getBounds();
+        const worldSize = Math.max(
+          bounds.maxX - bounds.minX,
+          bounds.maxZ - bounds.minZ
+        );
+        const useChunkStreaming = worldSize > 2000; // Use chunks for worlds > 2km
+
+        if (useChunkStreaming) {
+          // Initialize chunk manager for streaming
+          this.chunkManager = new ChunkManager(this.scene);
+          this.chunkManager.init(
+            this.roadGenerator.roads,
+            this.roadGenerator.pois,
+            this.roadGenerator
+          );
+          console.log('Chunk-based streaming enabled for large world');
+        } else {
+          // Load all roads at once for small worlds
+          this.roadGenerator.generateRoads();
+          this.roadGenerator.createPOIMarkers();
+        }
 
         // Build pathfinding graph from road data
         this.pathfinder = new Pathfinder();
@@ -441,14 +509,14 @@ export class Game {
         this.terrainSystem = new TerrainSystem(this.scene);
         this.terrainSystem.init(
           this.roadGenerator.roads,
-          this.roadGenerator.getBounds()
+          bounds
         );
 
         // Pass road data to miniMap
         if (this.miniMap) {
           this.miniMap.setRoadData(
             this.roadGenerator.roads,
-            this.roadGenerator.getBounds()
+            bounds
           );
           this.miniMap.setPOIData(this.roadGenerator.pois);
         }
@@ -585,6 +653,46 @@ export class Game {
       if (this.hud) {
         this.hud.setMoney(this.playerMoney);
         this.hud.setFuel(this.fuelSystem.getFuelPercent());
+      }
+    }
+  }
+
+  /**
+   * Try to repair at a service station
+   */
+  tryRepair() {
+    if (this.gameState !== 'playing') return;
+    if (!this.maintenanceSystem || !this.maintenanceSystem.canRepair) return;
+
+    const cost = this.maintenanceSystem.getTotalRepairCost();
+
+    // Check if anything needs repair
+    if (cost === 0) {
+      if (this.notification) {
+        this.notification.showInfo('No Repairs Needed', 'Your truck is in good condition!');
+      }
+      return;
+    }
+
+    // Check if player has enough money
+    if (this.playerMoney < cost) {
+      if (this.notification) {
+        this.notification.show({
+          type: 'warning',
+          title: 'Not Enough Money',
+          message: `Need \u20B1${cost.toLocaleString()} for full repair`,
+          icon: '\uD83D\uDCB0',
+        });
+      }
+      return;
+    }
+
+    // Perform repair
+    const result = this.maintenanceSystem.repairAll();
+    if (result.repaired) {
+      this.playerMoney -= result.cost;
+      if (this.hud) {
+        this.hud.setMoney(this.playerMoney);
       }
     }
   }
@@ -1012,6 +1120,14 @@ export class Game {
     // Update physics simulation
     this.physics.update(deltaTime);
 
+    // Update chunk streaming based on player position
+    if (this.chunkManager && this.testTruck) {
+      this.chunkManager.update(
+        this.testTruck.position.x,
+        this.testTruck.position.z
+      );
+    }
+
     // Update job system
     if (this.jobSystem && this.testTruck) {
       this.jobSystem.update(
@@ -1102,6 +1218,36 @@ export class Game {
       }
     }
 
+    // Update maintenance system
+    if (this.maintenanceSystem && this.testTruck) {
+      // Calculate distance traveled this frame (convert m/s to km)
+      const distanceKm = this.truckSpeed * deltaTime / 1000;
+
+      // Get driving conditions
+      const braking = this.input.getBrakeInput() > 0;
+      const isRaining = this.weatherSystem ? this.weatherSystem.isRaining() : false;
+
+      // Update wear
+      if (distanceKm > 0) {
+        this.maintenanceSystem.updateWear(distanceKm, {
+          speed: this.truckSpeed * 3.6, // Convert m/s to km/h
+          braking,
+          offroad: false, // TODO: detect when off-road
+          rain: isRaining,
+        });
+      }
+
+      // Check if near service station (using gas stations as service stations for now)
+      const serviceStations = this.roadGenerator
+        ? this.roadGenerator.getFuelStations()
+        : [{ x: 20, z: 30, name: 'Test Service Station' }];
+      this.maintenanceSystem.checkNearServiceStation(
+        this.testTruck.position.x,
+        this.testTruck.position.z,
+        serviceStations
+      );
+    }
+
     // Update HUD
     this.updateHUD();
   }
@@ -1155,11 +1301,22 @@ export class Game {
     const steering = this.input.getSteeringInput();
     const handbrake = this.input.isHandbrakeActive();
 
-    // Physics constants
-    const engineForce = 8000; // Newtons
-    const brakeForce = 12000;
+    // Physics constants (base values)
+    let engineForce = 8000; // Newtons
+    let brakeForce = 12000;
     const maxSteerTorque = 3000;
-    const maxSpeed = 30; // m/s (~108 km/h)
+    let maxSpeed = 30; // m/s (~108 km/h)
+
+    // Apply maintenance damage multipliers
+    if (this.maintenanceSystem) {
+      const accelMult = this.maintenanceSystem.getPerformanceMultiplier('acceleration');
+      const speedMult = this.maintenanceSystem.getPerformanceMultiplier('maxSpeed');
+      const brakeMult = this.maintenanceSystem.getPerformanceMultiplier('braking');
+
+      engineForce *= accelMult;
+      maxSpeed *= speedMult;
+      brakeForce *= brakeMult;
+    }
 
     // Get current velocity
     const velocity = this.physics.getVelocity(this.truckBody);

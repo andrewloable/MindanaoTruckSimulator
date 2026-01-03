@@ -18,30 +18,58 @@ export const TrailerTypes = {
   FLATBED: {
     id: 'flatbed',
     name: 'Flatbed Trailer',
-    cargoTypes: ['lumber', 'construction'],
+    cargoTypes: ['lumber', 'construction', 'rubber'],
     length: 10,
     color: 0x795548, // Brown
   },
   TANKER: {
     id: 'tanker',
     name: 'Tanker Trailer',
-    cargoTypes: ['fuel'],
+    cargoTypes: ['fuel', 'palm_oil'],
     length: 10,
     color: 0x9E9E9E, // Gray
   },
   REFRIGERATED: {
     id: 'refrigerated',
     name: 'Refrigerated Trailer',
-    cargoTypes: ['produce', 'fish'],
+    cargoTypes: ['produce', 'fish', 'bananas', 'durian', 'pineapple'],
     length: 11,
     color: 0xFFFFFF, // White
   },
   COVERED: {
     id: 'covered',
     name: 'Covered Trailer',
-    cargoTypes: ['rice'],
+    cargoTypes: ['rice', 'coconut', 'coffee', 'abaca', 'cacao'],
     length: 9,
     color: 0x8BC34A, // Light green
+  },
+  LIVESTOCK: {
+    id: 'livestock',
+    name: 'Livestock Trailer',
+    cargoTypes: ['livestock'],
+    length: 10,
+    color: 0xA1887F, // Brown
+  },
+  DUMP: {
+    id: 'dump',
+    name: 'Dump Trailer',
+    cargoTypes: ['mining'],
+    length: 8,
+    color: 0xFFC107, // Amber
+  },
+  LOGGING: {
+    id: 'logging',
+    name: 'Logging Trailer',
+    cargoTypes: ['logs'],
+    length: 14,
+    color: 0x5D4037, // Dark brown
+  },
+  LOWBOY: {
+    id: 'lowboy',
+    name: 'Lowboy Trailer',
+    cargoTypes: ['heavy_equipment'],
+    length: 13,
+    color: 0xFF5722, // Deep orange
   },
 };
 
@@ -78,6 +106,18 @@ export class Trailer {
         break;
       case 'covered':
         this.buildCoveredTrailer();
+        break;
+      case 'livestock':
+        this.buildLivestockTrailer();
+        break;
+      case 'dump':
+        this.buildDumpTrailer();
+        break;
+      case 'logging':
+        this.buildLoggingTrailer();
+        break;
+      case 'lowboy':
+        this.buildLowboyTrailer();
         break;
       default:
         this.buildContainerTrailer();
@@ -405,6 +445,372 @@ export class Trailer {
       rope.position.set(0, 2.2, -z);
       this.group.add(rope);
     }
+  }
+
+  /**
+   * Build livestock trailer
+   */
+  buildLivestockTrailer() {
+    const length = this.type.length;
+
+    // Frame
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x333333,
+      roughness: 0.8,
+      metalness: 0.3,
+    });
+
+    const frameGeometry = new THREE.BoxGeometry(2.4, 0.15, length);
+    const frame = new THREE.Mesh(frameGeometry, frameMaterial);
+    frame.position.set(0, 0.6, -length / 2);
+    frame.castShadow = true;
+    this.group.add(frame);
+
+    // Side walls with ventilation slats
+    const wallMaterial = new THREE.MeshStandardMaterial({
+      color: this.type.color,
+      roughness: 0.7,
+      metalness: 0.1,
+    });
+
+    // Floor
+    const floorGeometry = new THREE.BoxGeometry(2.3, 0.1, length - 0.5);
+    const floor = new THREE.Mesh(floorGeometry, wallMaterial);
+    floor.position.set(0, 0.75, -length / 2);
+    this.group.add(floor);
+
+    // Create slatted walls
+    const slatMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8D6E63,
+      roughness: 0.9,
+    });
+
+    // Vertical posts
+    const postGeometry = new THREE.BoxGeometry(0.08, 1.8, 0.08);
+    for (let z = 0.5; z < length - 0.5; z += 1.5) {
+      const leftPost = new THREE.Mesh(postGeometry, frameMaterial);
+      leftPost.position.set(-1.15, 1.6, -z);
+      this.group.add(leftPost);
+
+      const rightPost = new THREE.Mesh(postGeometry, frameMaterial);
+      rightPost.position.set(1.15, 1.6, -z);
+      this.group.add(rightPost);
+    }
+
+    // Horizontal slats (for ventilation)
+    const slatGeometry = new THREE.BoxGeometry(0.05, 0.08, length - 1);
+    for (let y = 0; y < 6; y++) {
+      // Left side
+      const leftSlat = new THREE.Mesh(slatGeometry, slatMaterial);
+      leftSlat.position.set(-1.18, 0.9 + y * 0.25, -length / 2);
+      this.group.add(leftSlat);
+
+      // Right side
+      const rightSlat = new THREE.Mesh(slatGeometry, slatMaterial);
+      rightSlat.position.set(1.18, 0.9 + y * 0.25, -length / 2);
+      this.group.add(rightSlat);
+    }
+
+    // Roof frame
+    const roofGeometry = new THREE.BoxGeometry(2.5, 0.05, length - 0.3);
+    const roof = new THREE.Mesh(roofGeometry, frameMaterial);
+    roof.position.set(0, 2.5, -length / 2);
+    roof.castShadow = true;
+    this.group.add(roof);
+
+    this.body = frame;
+  }
+
+  /**
+   * Build dump trailer
+   */
+  buildDumpTrailer() {
+    const length = this.type.length;
+
+    // Frame
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x333333,
+      roughness: 0.8,
+      metalness: 0.3,
+    });
+
+    const frameGeometry = new THREE.BoxGeometry(2.4, 0.2, length);
+    const frame = new THREE.Mesh(frameGeometry, frameMaterial);
+    frame.position.set(0, 0.6, -length / 2);
+    frame.castShadow = true;
+    this.group.add(frame);
+
+    // Dump bed (tapered)
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: this.type.color,
+      roughness: 0.5,
+      metalness: 0.4,
+    });
+
+    // Create dump body shape
+    const bedShape = new THREE.Shape();
+    bedShape.moveTo(-1.1, 0);
+    bedShape.lineTo(-1.3, 1.5);
+    bedShape.lineTo(1.3, 1.5);
+    bedShape.lineTo(1.1, 0);
+    bedShape.lineTo(-1.1, 0);
+
+    const bedSettings = {
+      steps: 1,
+      depth: length - 1,
+      bevelEnabled: false,
+    };
+
+    const bedGeometry = new THREE.ExtrudeGeometry(bedShape, bedSettings);
+    this.body = new THREE.Mesh(bedGeometry, bodyMaterial);
+    this.body.rotation.x = -Math.PI / 2;
+    this.body.position.set(0, 0.8, -0.5);
+    this.body.castShadow = true;
+    this.group.add(this.body);
+
+    // Back door (hinged at bottom)
+    const doorMaterial = new THREE.MeshStandardMaterial({
+      color: 0xE65100,
+      roughness: 0.6,
+      metalness: 0.3,
+    });
+
+    const doorGeometry = new THREE.BoxGeometry(2.4, 1.5, 0.08);
+    const door = new THREE.Mesh(doorGeometry, doorMaterial);
+    door.position.set(0, 1.55, -length + 0.5);
+    this.group.add(door);
+
+    // Mining ore cargo
+    const oreMaterial = new THREE.MeshStandardMaterial({
+      color: 0x5D4037,
+      roughness: 0.95,
+    });
+
+    // Random ore chunks
+    for (let i = 0; i < 15; i++) {
+      const size = 0.2 + Math.random() * 0.3;
+      const oreGeometry = new THREE.DodecahedronGeometry(size);
+      const ore = new THREE.Mesh(oreGeometry, oreMaterial);
+      ore.position.set(
+        (Math.random() - 0.5) * 1.8,
+        1.5 + Math.random() * 0.5,
+        -1 - Math.random() * (length - 3)
+      );
+      ore.rotation.set(
+        Math.random() * Math.PI,
+        Math.random() * Math.PI,
+        Math.random() * Math.PI
+      );
+      this.group.add(ore);
+    }
+  }
+
+  /**
+   * Build logging trailer
+   */
+  buildLoggingTrailer() {
+    const length = this.type.length;
+
+    // Main spine/beam
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: 0x333333,
+      roughness: 0.8,
+      metalness: 0.3,
+    });
+
+    const spineGeometry = new THREE.BoxGeometry(0.4, 0.3, length);
+    const spine = new THREE.Mesh(spineGeometry, frameMaterial);
+    spine.position.set(0, 0.6, -length / 2);
+    spine.castShadow = true;
+    this.group.add(spine);
+
+    // Bolsters (cross beams for logs)
+    const bolsterGeometry = new THREE.BoxGeometry(2.6, 0.2, 0.4);
+    const bolsterPositions = [-2, -length / 2, -length + 2];
+
+    for (const z of bolsterPositions) {
+      const bolster = new THREE.Mesh(bolsterGeometry, frameMaterial);
+      bolster.position.set(0, 0.8, z);
+      this.group.add(bolster);
+
+      // Uprights (stakes)
+      const stakeGeometry = new THREE.BoxGeometry(0.1, 1.8, 0.1);
+      const leftStake = new THREE.Mesh(stakeGeometry, frameMaterial);
+      leftStake.position.set(-1.2, 1.7, z);
+      this.group.add(leftStake);
+
+      const rightStake = new THREE.Mesh(stakeGeometry, frameMaterial);
+      rightStake.position.set(1.2, 1.7, z);
+      this.group.add(rightStake);
+    }
+
+    // Logs cargo
+    const logMaterial = new THREE.MeshStandardMaterial({
+      color: this.type.color,
+      roughness: 0.9,
+    });
+
+    const barkMaterial = new THREE.MeshStandardMaterial({
+      color: 0x3E2723,
+      roughness: 0.95,
+    });
+
+    // Create log stack
+    const logRadius = 0.35;
+    const logLength = length - 2;
+
+    // Bottom row (4 logs)
+    for (let i = 0; i < 4; i++) {
+      const logGeometry = new THREE.CylinderGeometry(logRadius, logRadius, logLength, 8);
+      const log = new THREE.Mesh(logGeometry, barkMaterial);
+      log.rotation.x = Math.PI / 2;
+      log.position.set(-1.0 + i * 0.7, 1.25, -length / 2);
+      log.castShadow = true;
+      this.group.add(log);
+    }
+
+    // Second row (3 logs)
+    for (let i = 0; i < 3; i++) {
+      const logGeometry = new THREE.CylinderGeometry(logRadius, logRadius, logLength, 8);
+      const log = new THREE.Mesh(logGeometry, barkMaterial);
+      log.rotation.x = Math.PI / 2;
+      log.position.set(-0.65 + i * 0.7, 1.85, -length / 2);
+      log.castShadow = true;
+      this.group.add(log);
+    }
+
+    // Top row (2 logs)
+    for (let i = 0; i < 2; i++) {
+      const logGeometry = new THREE.CylinderGeometry(logRadius, logRadius, logLength, 8);
+      const log = new THREE.Mesh(logGeometry, barkMaterial);
+      log.rotation.x = Math.PI / 2;
+      log.position.set(-0.35 + i * 0.7, 2.45, -length / 2);
+      log.castShadow = true;
+      this.group.add(log);
+    }
+
+    this.body = spine;
+  }
+
+  /**
+   * Build lowboy trailer (for heavy equipment)
+   */
+  buildLowboyTrailer() {
+    const length = this.type.length;
+
+    // Frame material
+    const frameMaterial = new THREE.MeshStandardMaterial({
+      color: this.type.color,
+      roughness: 0.6,
+      metalness: 0.4,
+    });
+
+    // Gooseneck (front raised section)
+    const neckGeometry = new THREE.BoxGeometry(2.4, 0.15, 3);
+    const neck = new THREE.Mesh(neckGeometry, frameMaterial);
+    neck.position.set(0, 1.0, -1.5);
+    neck.castShadow = true;
+    this.group.add(neck);
+
+    // Transition ramp
+    const rampShape = new THREE.Shape();
+    rampShape.moveTo(0, 1.0);
+    rampShape.lineTo(0, 0.4);
+    rampShape.lineTo(2, 0.4);
+    rampShape.lineTo(2, 1.0);
+    rampShape.lineTo(0, 1.0);
+
+    const rampSettings = {
+      steps: 1,
+      depth: 2.4,
+      bevelEnabled: false,
+    };
+
+    const rampGeometry = new THREE.ExtrudeGeometry(rampShape, rampSettings);
+    const ramp = new THREE.Mesh(rampGeometry, frameMaterial);
+    ramp.rotation.y = Math.PI / 2;
+    ramp.position.set(1.2, 0, -3);
+    this.group.add(ramp);
+
+    // Low deck (main platform)
+    const deckGeometry = new THREE.BoxGeometry(2.6, 0.15, length - 6);
+    const deck = new THREE.Mesh(deckGeometry, frameMaterial);
+    deck.position.set(0, 0.4, -length / 2 - 1);
+    deck.castShadow = true;
+    this.group.add(deck);
+
+    // Rear ramp
+    const rearRampGeometry = new THREE.BoxGeometry(2.6, 0.1, 2);
+    const rearRamp = new THREE.Mesh(rearRampGeometry, frameMaterial);
+    rearRamp.position.set(0, 0.35, -length + 1);
+    rearRamp.rotation.x = -0.15;
+    this.group.add(rearRamp);
+
+    // Side rails
+    const railMaterial = new THREE.MeshStandardMaterial({
+      color: 0x333333,
+      roughness: 0.8,
+      metalness: 0.3,
+    });
+
+    const railGeometry = new THREE.BoxGeometry(0.1, 0.4, length - 4);
+    const leftRail = new THREE.Mesh(railGeometry, railMaterial);
+    leftRail.position.set(-1.25, 0.65, -length / 2);
+    this.group.add(leftRail);
+
+    const rightRail = new THREE.Mesh(railGeometry, railMaterial);
+    rightRail.position.set(1.25, 0.65, -length / 2);
+    this.group.add(rightRail);
+
+    // Heavy equipment cargo (bulldozer representation)
+    const equipMaterial = new THREE.MeshStandardMaterial({
+      color: 0xFFD54F, // CAT yellow
+      roughness: 0.6,
+      metalness: 0.2,
+    });
+
+    const trackMaterial = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a,
+      roughness: 0.9,
+    });
+
+    // Bulldozer body
+    const bodyGeometry = new THREE.BoxGeometry(1.8, 1.0, 2.5);
+    const bulldozerBody = new THREE.Mesh(bodyGeometry, equipMaterial);
+    bulldozerBody.position.set(0, 1.0, -length / 2);
+    bulldozerBody.castShadow = true;
+    this.group.add(bulldozerBody);
+
+    // Cabin
+    const cabinGeometry = new THREE.BoxGeometry(1.4, 0.9, 1.2);
+    const cabin = new THREE.Mesh(cabinGeometry, equipMaterial);
+    cabin.position.set(0, 1.95, -length / 2 + 0.4);
+    cabin.castShadow = true;
+    this.group.add(cabin);
+
+    // Tracks
+    const trackGeometry = new THREE.BoxGeometry(0.4, 0.5, 2.8);
+    const leftTrack = new THREE.Mesh(trackGeometry, trackMaterial);
+    leftTrack.position.set(-0.9, 0.7, -length / 2);
+    this.group.add(leftTrack);
+
+    const rightTrack = new THREE.Mesh(trackGeometry, trackMaterial);
+    rightTrack.position.set(0.9, 0.7, -length / 2);
+    this.group.add(rightTrack);
+
+    // Blade
+    const bladeMaterial = new THREE.MeshStandardMaterial({
+      color: 0x424242,
+      roughness: 0.4,
+      metalness: 0.6,
+    });
+
+    const bladeGeometry = new THREE.BoxGeometry(2.2, 0.8, 0.15);
+    const blade = new THREE.Mesh(bladeGeometry, bladeMaterial);
+    blade.position.set(0, 0.9, -length / 2 - 1.5);
+    this.group.add(blade);
+
+    this.body = deck;
   }
 
   /**
