@@ -5,16 +5,16 @@
  * Built with Three.js for 3D rendering.
  */
 
-import * as THREE from 'three';
-import { Game } from './core/Game.js';
+// Use Babylon.js with Havok physics instead of Three.js
+import { BabylonGame } from './core/BabylonGame.js';
 
 // Design system
 import './styles/design-tokens.css';
 
 // Wait for DOM to be ready
 document.addEventListener('DOMContentLoaded', () => {
-  // Initialize the game
-  const game = new Game();
+  // Initialize the game (using Babylon.js + Havok)
+  const game = new BabylonGame();
 
   // Start the game loop
   game.init().then(() => {
