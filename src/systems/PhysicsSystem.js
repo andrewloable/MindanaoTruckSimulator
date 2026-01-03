@@ -21,6 +21,12 @@ export class PhysicsSystem {
     // Materials
     this.materials = {};
     this.contactMaterials = [];
+
+    // Vehicle body reference for collision tracking
+    this.vehicleBody = null;
+
+    // Collision callback
+    this.onVehicleCollision = null;
   }
 
   /**
@@ -186,7 +192,41 @@ export class PhysicsSystem {
     this.world.addBody(chassisBody);
     this.linkMeshToBody(vehicleMesh, chassisBody);
 
+    // Store vehicle body reference for collision tracking
+    this.vehicleBody = chassisBody;
+
+    // Add collision listener for cargo damage
+    chassisBody.addEventListener('collide', (event) => {
+      this.handleVehicleCollision(event);
+    });
+
     return chassisBody;
+  }
+
+  /**
+   * Handle vehicle collision events
+   * @param {Object} event - Cannon.js collision event
+   */
+  handleVehicleCollision(event) {
+    // Calculate impact force from relative velocity
+    const contact = event.contact;
+    if (!contact) return;
+
+    // Get impact velocity (magnitude of relative velocity)
+    const impactVelocity = contact.getImpactVelocityAlongNormal();
+    const impactForce = Math.abs(impactVelocity);
+
+    // Ignore minor bumps (threshold of 2 m/s)
+    if (impactForce < 2) return;
+
+    // Calculate damage based on impact (0-100 scale)
+    // 2 m/s = 0 damage, 20 m/s = 100 damage (linear scale)
+    const damage = Math.min(100, ((impactForce - 2) / 18) * 100);
+
+    // Trigger callback if registered
+    if (this.onVehicleCollision && damage > 0) {
+      this.onVehicleCollision(damage, impactForce);
+    }
   }
 
   /**

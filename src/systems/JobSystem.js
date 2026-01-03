@@ -359,6 +359,7 @@ export class JobSystem {
     job.status = 'active';
     job.startedAt = Date.now();
     job.startPosition = null; // Will be set when player position is known
+    job.damage = 0; // Cargo damage percentage (0-100)
 
     this.activeJob = job;
 
@@ -381,6 +382,36 @@ export class JobSystem {
 
     console.log('Job cancelled');
     return true;
+  }
+
+  /**
+   * Apply damage to cargo from collisions
+   * @param {number} amount - Damage amount (0-100 scale based on impact)
+   * @returns {number} New total damage, or -1 if no active job
+   */
+  applyDamage(amount) {
+    if (!this.activeJob) return -1;
+
+    // Fragile cargo takes more damage
+    const multiplier = this.activeJob.cargo.fragile ? 2.0 : 1.0;
+    const actualDamage = amount * multiplier;
+
+    this.activeJob.damage = Math.min(100, this.activeJob.damage + actualDamage);
+
+    // Check for critical damage (>= 80%)
+    if (this.activeJob.damage >= 80) {
+      this.failJob('Cargo critically damaged');
+    }
+
+    return this.activeJob.damage;
+  }
+
+  /**
+   * Get current cargo damage
+   * @returns {number} Damage percentage (0-100), or 0 if no active job
+   */
+  getCargoDamage() {
+    return this.activeJob ? this.activeJob.damage : 0;
   }
 
   /**
@@ -461,10 +492,19 @@ export class JobSystem {
       console.log(`Early delivery bonus: ₱${bonus}`);
     }
 
-    job.finalPayment = finalPayment;
+    // Cargo damage penalty (up to 50% reduction based on damage)
+    if (job.damage > 0) {
+      const damagePenaltyPercent = Math.min(50, job.damage * 0.5); // 0-50% penalty
+      const damagePenalty = Math.round(job.payment * (damagePenaltyPercent / 100));
+      finalPayment -= damagePenalty;
+      job.damagePenalty = damagePenalty;
+      console.log(`Cargo damage penalty (${job.damage.toFixed(1)}% damage): -₱${damagePenalty}`);
+    }
+
+    job.finalPayment = Math.max(0, finalPayment);
 
     // Update stats
-    this.totalEarnings += finalPayment;
+    this.totalEarnings += job.finalPayment;
     this.totalDeliveries++;
     this.totalDistance += job.distanceKm;
 

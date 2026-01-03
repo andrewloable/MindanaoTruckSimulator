@@ -170,6 +170,25 @@ export class Game {
     this.physics.init();
     this.physics.createGroundPlane(0, 'ground');
 
+    // Setup collision callback for cargo damage
+    this.physics.onVehicleCollision = (damage, impactForce) => {
+      if (this.jobSystem && this.jobSystem.activeJob) {
+        const newDamage = this.jobSystem.applyDamage(damage);
+        if (newDamage >= 0 && this.notification) {
+          // Show damage notification for significant impacts
+          if (damage >= 10) {
+            this.notification.show({
+              type: 'warning',
+              title: 'Cargo Damaged!',
+              message: `Impact damage: ${damage.toFixed(1)}% (Total: ${newDamage.toFixed(1)}%)`,
+              icon: '📦',
+              duration: 2000,
+            });
+          }
+        }
+      }
+    };
+
     updateLoadingProgress(70);
 
     // Initialize road generator and try to load roads
