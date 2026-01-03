@@ -32,6 +32,7 @@ export const InputAction = {
   RADIO_NEXT: 'radioNext',
   RADIO_PREV: 'radioPrev',
   REFUEL: 'refuel',
+  WEATHER_CYCLE: 'weatherCycle',
 };
 
 // Default gamepad button/axis mappings (standard gamepad layout)
@@ -110,6 +111,7 @@ const DEFAULT_KEY_BINDINGS = {
   'BracketRight': InputAction.RADIO_NEXT,
   'BracketLeft': InputAction.RADIO_PREV,
   'KeyF': InputAction.REFUEL,
+  'KeyP': InputAction.WEATHER_CYCLE,
 };
 
 export class InputManager {
@@ -599,15 +601,43 @@ export class InputManager {
 
   /**
    * Rebind a key to an action
-   * @param {string} keyCode - Key code (e.g., 'KeyW')
    * @param {string} action - Action name from InputAction
+   * @param {string} keyCode - Key code (e.g., 'KeyW')
    */
-  rebindKey(keyCode, action) {
+  rebindKey(action, keyCode) {
     // Remove any existing binding for this key
     delete this.keyBindings[keyCode];
 
+    // Remove old binding for this action (only primary, keep secondary arrow keys)
+    for (const [key, act] of Object.entries(this.keyBindings)) {
+      if (act === action && !key.startsWith('Arrow')) {
+        delete this.keyBindings[key];
+        break;
+      }
+    }
+
     // Add new binding
     this.keyBindings[keyCode] = action;
+  }
+
+  /**
+   * Get the primary key bound to an action
+   * @param {string} action - Action name from InputAction
+   * @returns {string|null} Key code or null if not bound
+   */
+  getKeyForAction(action) {
+    for (const [key, act] of Object.entries(this.keyBindings)) {
+      if (act === action && !key.startsWith('Arrow')) {
+        return key;
+      }
+    }
+    // Fallback to arrow keys if no primary binding
+    for (const [key, act] of Object.entries(this.keyBindings)) {
+      if (act === action) {
+        return key;
+      }
+    }
+    return null;
   }
 
   /**

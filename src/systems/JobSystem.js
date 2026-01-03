@@ -97,18 +97,28 @@ export class JobSystem {
     this.onJobCompleted = null;
     this.onJobFailed = null;
     this.onJobsRefreshed = null;
+
+    // Pathfinder reference for GPS routing
+    this.pathfinder = null;
   }
 
   /**
    * Initialize job system with POI data
    * @param {Array} pois - Array of POI objects from RoadGenerator
+   * @param {Pathfinder} pathfinder - Optional pathfinder for road routing
    */
-  init(pois) {
+  init(pois, pathfinder = null) {
     // Separate cities and towns
     this.cities = pois.filter(p => p.type === 'city');
     this.towns = pois.filter(p => p.type === 'town');
 
+    // Store pathfinder reference
+    this.pathfinder = pathfinder;
+
     console.log(`JobSystem initialized with ${this.cities.length} cities and ${this.towns.length} towns`);
+    if (this.pathfinder && this.pathfinder.isReady()) {
+      console.log('GPS routing enabled via pathfinder');
+    }
 
     // Generate initial jobs
     this.refreshJobs();
@@ -407,17 +417,30 @@ export class JobSystem {
 
   /**
    * Get route points from origin to destination
-   * For now, returns a simple direct line. Could be enhanced with pathfinding.
+   * Uses pathfinder for road-based routing if available
    * @returns {Array|null} Array of [x, z] points or null if no active job
    */
   getRoutePoints() {
     if (!this.activeJob) return null;
 
-    // Simple direct route for now
-    // TODO: Implement proper pathfinding along roads
+    const origin = this.activeJob.origin;
+    const destination = this.activeJob.destination;
+
+    // Use pathfinder for road-based routing if available
+    if (this.pathfinder && this.pathfinder.isReady()) {
+      const path = this.pathfinder.findPath(
+        origin.x, origin.z,
+        destination.x, destination.z
+      );
+      if (path && path.length > 0) {
+        return path;
+      }
+    }
+
+    // Fallback to direct line if no pathfinder or no path found
     return [
-      [this.activeJob.origin.x, this.activeJob.origin.z],
-      [this.activeJob.destination.x, this.activeJob.destination.z],
+      [origin.x, origin.z],
+      [destination.x, destination.z],
     ];
   }
 

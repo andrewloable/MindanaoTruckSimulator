@@ -8,6 +8,8 @@ import * as THREE from 'three';
 import { updateLoadingProgress, hideLoadingScreen } from '../main.js';
 import { InputManager, InputAction } from './InputManager.js';
 import { SkySystem } from '../world/SkySystem.js';
+import { WeatherSystem } from '../world/WeatherSystem.js';
+import { TerrainSystem } from '../world/TerrainSystem.js';
 import { RoadGenerator } from '../world/RoadGenerator.js';
 import { PhysicsSystem } from '../systems/PhysicsSystem.js';
 import { AudioManager, AudioCategory, loadGameSounds, EngineAudio, HornAudio } from '../systems/AudioManager.js';
@@ -21,6 +23,7 @@ import { HUD } from '../ui/HUD.js';
 import { MiniMap } from '../ui/MiniMap.js';
 import { JobMarket } from '../ui/JobMarket.js';
 import { JobSystem } from '../systems/JobSystem.js';
+import { Pathfinder } from '../systems/Pathfinder.js';
 import { RadioSystem } from '../systems/RadioSystem.js';
 import { RadioWidget } from '../ui/RadioWidget.js';
 import { Garage } from '../ui/Garage.js';
@@ -41,6 +44,8 @@ export class Game {
     // Game systems
     this.input = null;
     this.skySystem = null;
+    this.weatherSystem = null;
+    this.terrainSystem = null;
     this.roadGenerator = null;
     this.physics = null;
     this.audio = null;
@@ -52,6 +57,7 @@ export class Game {
     this.miniMap = null;
     this.jobMarket = null;
     this.jobSystem = null;
+    this.pathfinder = null;
     this.radioSystem = null;
     this.radioWidget = null;
     this.garage = null;
@@ -146,6 +152,10 @@ export class Game {
     this.skySystem.setTimeOfDay(10); // 10 AM
     this.skySystem.setSunLight(this.sunLight);
     this.skySystem.setAmbientLight(this.ambientLight);
+
+    // Initialize weather system
+    this.weatherSystem = new WeatherSystem(this.scene, this.camera);
+    this.weatherSystem.init();
 
     updateLoadingProgress(60);
 
@@ -253,6 +263,16 @@ export class Game {
     // Refuel
     this.input.onAction(InputAction.REFUEL, () => {
       this.tryRefuel();
+    });
+
+    // Weather cycle (for testing)
+    this.input.onAction(InputAction.WEATHER_CYCLE, () => {
+      if (this.weatherSystem) {
+        this.weatherSystem.cycleWeather();
+        if (this.notification) {
+          this.notification.showInfo('Weather', `Changed to ${this.weatherSystem.getWeather()}`);
+        }
+      }
     });
   }
 
@@ -413,6 +433,17 @@ export class Game {
         await this.roadGenerator.loadPOIs('/data/processed/pois.json');
         this.roadGenerator.createPOIMarkers();
 
+        // Build pathfinding graph from road data
+        this.pathfinder = new Pathfinder();
+        this.pathfinder.buildGraph(this.roadGenerator.roads);
+
+        // Initialize terrain system with road elevation data
+        this.terrainSystem = new TerrainSystem(this.scene);
+        this.terrainSystem.init(
+          this.roadGenerator.roads,
+          this.roadGenerator.getBounds()
+        );
+
         // Pass road data to miniMap
         if (this.miniMap) {
           this.miniMap.setRoadData(
@@ -422,9 +453,9 @@ export class Game {
           this.miniMap.setPOIData(this.roadGenerator.pois);
         }
 
-        // Initialize job system with POI data
+        // Initialize job system with POI data and pathfinder
         if (this.jobSystem) {
-          this.jobSystem.init(this.roadGenerator.pois);
+          this.jobSystem.init(this.roadGenerator.pois, this.pathfinder);
         }
       }
     } catch (error) {
@@ -1002,12 +1033,36 @@ export class Game {
     // Update camera
     this.updateCamera(deltaTime);
 
+    // Update audio listener position (for 3D spatial audio)
+    if (this.audio && this.audio.isInitialized() && this.camera) {
+      // Get camera forward direction
+      const forward = new THREE.Vector3(0, 0, -1);
+      forward.applyQuaternion(this.camera.quaternion);
+
+      this.audio.setListenerPosition(
+        { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z },
+        { x: forward.x, y: forward.y, z: forward.z },
+        { x: 0, y: 1, z: 0 }
+      );
+    }
+
     // Update sky system (day/night cycle)
     if (this.skySystem) {
       this.skySystem.update(deltaTime);
 
       // Auto-enable headlights at night
       if (this.skySystem.isNight() && !this.headlightsOn) {
+        this.headlightsOn = true;
+        this.updateHeadlights();
+      }
+    }
+
+    // Update weather system
+    if (this.weatherSystem) {
+      this.weatherSystem.update(deltaTime);
+
+      // Auto-enable headlights in heavy rain
+      if (this.weatherSystem.isRaining() && !this.headlightsOn) {
         this.headlightsOn = true;
         this.updateHeadlights();
       }
@@ -1034,10 +1089,11 @@ export class Game {
       const throttle = this.input.getThrottleInput();
       this.fuelSystem.update(this.truckSpeed, throttle, deltaTime);
 
-      // Check if near gas station (using test position for now)
-      // In full implementation, this would use POI data from roadGenerator
-      const gasStations = [{ x: 20, z: 30, name: 'Test Gas Station' }];
+      // Check if near gas station using real POI data
       if (this.testTruck) {
+        const gasStations = this.roadGenerator
+          ? this.roadGenerator.getFuelStations()
+          : [{ x: 20, z: 30, name: 'Test Gas Station' }]; // Fallback for testing
         this.fuelSystem.checkNearGasStation(
           this.testTruck.position.x,
           this.testTruck.position.z,

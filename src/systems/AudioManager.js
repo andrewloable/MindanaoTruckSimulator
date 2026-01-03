@@ -45,6 +45,14 @@ export class AudioManager {
 
     // Currently playing loops
     this.loops = new Map();
+
+    // Spatial audio: listener position (updated by game)
+    this.listenerPosition = { x: 0, y: 0, z: 0 };
+    this.listenerForward = { x: 0, y: 0, z: -1 };
+    this.listenerUp = { x: 0, y: 1, z: 0 };
+
+    // Active 3D sounds
+    this.spatial3DSounds = new Map();
   }
 
   /**
@@ -381,10 +389,195 @@ export class AudioManager {
   }
 
   /**
+   * Update listener position and orientation for 3D audio
+   * @param {Object} position - {x, y, z} listener position
+   * @param {Object} forward - {x, y, z} forward direction vector
+   * @param {Object} up - {x, y, z} up direction vector
+   */
+  setListenerPosition(position, forward = null, up = null) {
+    if (!this.initialized || !this.audioContext) return;
+
+    this.listenerPosition = position;
+    if (forward) this.listenerForward = forward;
+    if (up) this.listenerUp = up;
+
+    const listener = this.audioContext.listener;
+
+    // Update listener position
+    if (listener.positionX) {
+      // New API
+      listener.positionX.setValueAtTime(position.x, this.audioContext.currentTime);
+      listener.positionY.setValueAtTime(position.y, this.audioContext.currentTime);
+      listener.positionZ.setValueAtTime(position.z, this.audioContext.currentTime);
+    } else {
+      // Legacy API
+      listener.setPosition(position.x, position.y, position.z);
+    }
+
+    // Update listener orientation
+    if (forward && up) {
+      if (listener.forwardX) {
+        // New API
+        listener.forwardX.setValueAtTime(forward.x, this.audioContext.currentTime);
+        listener.forwardY.setValueAtTime(forward.y, this.audioContext.currentTime);
+        listener.forwardZ.setValueAtTime(forward.z, this.audioContext.currentTime);
+        listener.upX.setValueAtTime(up.x, this.audioContext.currentTime);
+        listener.upY.setValueAtTime(up.y, this.audioContext.currentTime);
+        listener.upZ.setValueAtTime(up.z, this.audioContext.currentTime);
+      } else {
+        // Legacy API
+        listener.setOrientation(forward.x, forward.y, forward.z, up.x, up.y, up.z);
+      }
+    }
+  }
+
+  /**
+   * Play a 3D positioned sound
+   * @param {string} id - Sound identifier
+   * @param {Object} position - {x, y, z} world position
+   * @param {Object} options - Playback options
+   * @returns {Object|null} - Sound handle
+   */
+  playSound3D(id, position, options = {}) {
+    if (!this.initialized) return null;
+
+    const buffer = this.buffers.get(id);
+    if (!buffer) {
+      console.warn(`Sound not loaded: ${id}`);
+      return null;
+    }
+
+    const {
+      category = AudioCategory.SFX,
+      volume = 1.0,
+      loop = false,
+      pitch = 1.0,
+      refDistance = 10, // Distance at which volume is 100%
+      maxDistance = 1000, // Distance at which volume is 0
+      rolloffFactor = 1.0, // How quickly volume drops with distance
+    } = options;
+
+    // Create source node
+    const source = this.audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.loop = loop;
+    source.playbackRate.value = pitch;
+
+    // Create gain node for volume control
+    const gainNode = this.audioContext.createGain();
+    gainNode.gain.value = volume;
+
+    // Create 3D panner node
+    const pannerNode = this.audioContext.createPanner();
+    pannerNode.panningModel = 'HRTF'; // High quality positional audio
+    pannerNode.distanceModel = 'inverse';
+    pannerNode.refDistance = refDistance;
+    pannerNode.maxDistance = maxDistance;
+    pannerNode.rolloffFactor = rolloffFactor;
+    pannerNode.coneInnerAngle = 360;
+    pannerNode.coneOuterAngle = 360;
+    pannerNode.coneOuterGain = 1;
+
+    // Set initial position
+    if (pannerNode.positionX) {
+      pannerNode.positionX.setValueAtTime(position.x, this.audioContext.currentTime);
+      pannerNode.positionY.setValueAtTime(position.y, this.audioContext.currentTime);
+      pannerNode.positionZ.setValueAtTime(position.z, this.audioContext.currentTime);
+    } else {
+      pannerNode.setPosition(position.x, position.y, position.z);
+    }
+
+    // Connect: source -> gain -> panner -> category gain -> master
+    source.connect(gainNode);
+    gainNode.connect(pannerNode);
+    pannerNode.connect(this.categoryGains.get(category) || this.masterGain);
+
+    // Start playback
+    source.start();
+
+    // Create handle for controlling the sound
+    const soundId = `${id}_3d_${Date.now()}`;
+    const handle = {
+      id: soundId,
+      source,
+      gainNode,
+      pannerNode,
+      category,
+      isPlaying: true,
+      setPosition: (pos) => {
+        if (pannerNode.positionX) {
+          pannerNode.positionX.setValueAtTime(pos.x, this.audioContext.currentTime);
+          pannerNode.positionY.setValueAtTime(pos.y, this.audioContext.currentTime);
+          pannerNode.positionZ.setValueAtTime(pos.z, this.audioContext.currentTime);
+        } else {
+          pannerNode.setPosition(pos.x, pos.y, pos.z);
+        }
+      },
+      setVolume: (v) => {
+        gainNode.gain.setTargetAtTime(v, this.audioContext.currentTime, 0.05);
+      },
+      stop: () => {
+        try {
+          gainNode.gain.setTargetAtTime(0, this.audioContext.currentTime, 0.05);
+          setTimeout(() => {
+            try { source.stop(); } catch (e) {}
+          }, 100);
+        } catch (e) {}
+        handle.isPlaying = false;
+        this.spatial3DSounds.delete(soundId);
+      },
+    };
+
+    this.spatial3DSounds.set(soundId, handle);
+
+    // Cleanup when sound ends naturally
+    source.onended = () => {
+      handle.isPlaying = false;
+      this.spatial3DSounds.delete(soundId);
+    };
+
+    return handle;
+  }
+
+  /**
+   * Play a looping 3D positioned sound
+   * @param {string} id - Sound identifier
+   * @param {Object} position - {x, y, z} world position
+   * @param {Object} options - Playback options
+   * @returns {Object|null} - Sound handle
+   */
+  playLoop3D(id, position, options = {}) {
+    return this.playSound3D(id, position, { ...options, loop: true });
+  }
+
+  /**
+   * Stop all 3D sounds
+   */
+  stopAll3D() {
+    for (const [id, handle] of this.spatial3DSounds) {
+      handle.stop();
+    }
+    this.spatial3DSounds.clear();
+  }
+
+  /**
+   * Get distance from listener to a position
+   * @param {Object} position - {x, y, z}
+   * @returns {number}
+   */
+  getDistanceToListener(position) {
+    const dx = position.x - this.listenerPosition.x;
+    const dy = position.y - this.listenerPosition.y;
+    const dz = position.z - this.listenerPosition.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  /**
    * Cleanup audio system
    */
   dispose() {
     this.stopAll();
+    this.stopAll3D();
     if (this.audioContext) {
       this.audioContext.close();
     }

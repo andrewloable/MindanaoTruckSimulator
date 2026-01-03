@@ -5,6 +5,7 @@
  */
 
 import { AudioCategory } from '../systems/AudioManager.js';
+import { InputAction } from '../core/InputManager.js';
 
 export class OptionsMenu {
   constructor(uiManager, audioManager, inputManager, callbacks = {}) {
@@ -19,6 +20,11 @@ export class OptionsMenu {
     this.sliders = new Map();
     this.tabButtons = new Map();
     this.tabPanels = new Map();
+
+    // Key remapping state
+    this.listeningForKey = null; // Currently listening binding element
+    this.listeningAction = null; // Action being remapped
+    this.bindingElements = new Map(); // action -> element
   }
 
   /**
@@ -257,6 +263,54 @@ export class OptionsMenu {
       .options-menu__btn--secondary:hover {
         background: rgba(255, 255, 255, 0.2);
       }
+      .options-menu__binding-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 6px;
+        margin-bottom: 8px;
+      }
+      .options-menu__binding-row:last-child {
+        margin-bottom: 0;
+      }
+      .options-menu__binding-action {
+        color: white;
+        font-size: 14px;
+      }
+      .options-menu__binding-key {
+        padding: 6px 12px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 13px;
+        font-family: monospace;
+        cursor: pointer;
+        min-width: 80px;
+        text-align: center;
+        transition: all 0.2s;
+      }
+      .options-menu__binding-key:hover {
+        background: rgba(255, 255, 255, 0.15);
+        border-color: #4CAF50;
+      }
+      .options-menu__binding-key--listening {
+        background: rgba(76, 175, 80, 0.3);
+        border-color: #4CAF50;
+        animation: pulse 1s infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+      }
+      .options-menu__binding-hint {
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 11px;
+        margin-top: 12px;
+        text-align: center;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -451,46 +505,167 @@ export class OptionsMenu {
 
     panel.appendChild(deadzoneSection);
 
-    // Keyboard hints
-    const keyboardSection = document.createElement('div');
-    keyboardSection.className = 'options-menu__section';
+    // Key bindings section
+    const bindingsSection = document.createElement('div');
+    bindingsSection.className = 'options-menu__section';
 
-    const keyboardTitle = document.createElement('div');
-    keyboardTitle.className = 'options-menu__section-title';
-    keyboardTitle.textContent = 'Keyboard Controls';
-    keyboardSection.appendChild(keyboardTitle);
+    const bindingsTitle = document.createElement('div');
+    bindingsTitle.className = 'options-menu__section-title';
+    bindingsTitle.textContent = 'Keyboard Bindings (Click to Remap)';
+    bindingsSection.appendChild(bindingsTitle);
 
-    const info = document.createElement('div');
-    info.className = 'options-menu__info';
-
-    const controls = [
-      { key: 'Movement', value: 'WASD or Arrow Keys' },
-      { key: 'Handbrake', value: 'Space' },
-      { key: 'Horn', value: 'H' },
-      { key: 'Headlights', value: 'L' },
-      { key: 'Camera', value: 'C' },
-      { key: 'Pause', value: 'ESC' },
+    // Actions that can be remapped
+    const remappableActions = [
+      { action: InputAction.ACCELERATE, label: 'Accelerate' },
+      { action: InputAction.BRAKE, label: 'Brake / Reverse' },
+      { action: InputAction.STEER_LEFT, label: 'Steer Left' },
+      { action: InputAction.STEER_RIGHT, label: 'Steer Right' },
+      { action: InputAction.HANDBRAKE, label: 'Handbrake' },
+      { action: InputAction.HORN, label: 'Horn' },
+      { action: InputAction.HEADLIGHTS, label: 'Headlights' },
+      { action: InputAction.CAMERA_NEXT, label: 'Camera View' },
+      { action: InputAction.TOGGLE_JOBS, label: 'Job Market' },
+      { action: InputAction.RADIO_TOGGLE, label: 'Radio On/Off' },
     ];
 
-    for (const control of controls) {
-      const line = document.createElement('div');
-      line.className = 'options-menu__info-line';
-
-      const keySpan = document.createElement('span');
-      keySpan.className = 'options-menu__info-key';
-      keySpan.textContent = control.key + ': ';
-      line.appendChild(keySpan);
-
-      const valueSpan = document.createTextNode(control.value);
-      line.appendChild(valueSpan);
-
-      info.appendChild(line);
+    for (const { action, label } of remappableActions) {
+      const row = this.createBindingRow(action, label);
+      bindingsSection.appendChild(row);
     }
 
-    keyboardSection.appendChild(info);
-    panel.appendChild(keyboardSection);
+    const hint = document.createElement('div');
+    hint.className = 'options-menu__binding-hint';
+    hint.textContent = 'Press ESC to cancel while remapping';
+    bindingsSection.appendChild(hint);
+
+    panel.appendChild(bindingsSection);
 
     return panel;
+  }
+
+  /**
+   * Create a key binding row
+   * @param {string} action - InputAction
+   * @param {string} label - Display label
+   * @returns {HTMLElement}
+   */
+  createBindingRow(action, label) {
+    const row = document.createElement('div');
+    row.className = 'options-menu__binding-row';
+
+    const actionLabel = document.createElement('div');
+    actionLabel.className = 'options-menu__binding-action';
+    actionLabel.textContent = label;
+    row.appendChild(actionLabel);
+
+    const keyBtn = document.createElement('button');
+    keyBtn.className = 'options-menu__binding-key';
+    keyBtn.textContent = this.getKeyDisplayName(action);
+    keyBtn.addEventListener('click', () => this.startKeyListen(action, keyBtn));
+    row.appendChild(keyBtn);
+
+    this.bindingElements.set(action, keyBtn);
+    return row;
+  }
+
+  /**
+   * Get display name for the key bound to an action
+   * @param {string} action
+   * @returns {string}
+   */
+  getKeyDisplayName(action) {
+    if (!this.inputManager) return '???';
+
+    const key = this.inputManager.getKeyForAction(action);
+    if (!key) return 'Unbound';
+
+    // Convert key code to friendly name
+    return this.formatKeyName(key);
+  }
+
+  /**
+   * Format a key code to a readable name
+   * @param {string} keyCode
+   * @returns {string}
+   */
+  formatKeyName(keyCode) {
+    if (!keyCode) return 'None';
+
+    // Common key code transformations
+    if (keyCode.startsWith('Key')) return keyCode.slice(3);
+    if (keyCode.startsWith('Digit')) return keyCode.slice(5);
+    if (keyCode.startsWith('Arrow')) return keyCode.slice(5);
+    if (keyCode === 'Space') return 'Space';
+    if (keyCode === 'Escape') return 'ESC';
+    if (keyCode === 'ShiftLeft' || keyCode === 'ShiftRight') return 'Shift';
+    if (keyCode === 'ControlLeft' || keyCode === 'ControlRight') return 'Ctrl';
+    if (keyCode === 'AltLeft' || keyCode === 'AltRight') return 'Alt';
+
+    return keyCode;
+  }
+
+  /**
+   * Start listening for a new key binding
+   * @param {string} action
+   * @param {HTMLElement} element
+   */
+  startKeyListen(action, element) {
+    // Cancel any existing listen
+    this.cancelKeyListen();
+
+    this.listeningForKey = element;
+    this.listeningAction = action;
+    element.classList.add('options-menu__binding-key--listening');
+    element.textContent = 'Press a key...';
+
+    // Add key listener
+    this.keyListenHandler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.code === 'Escape') {
+        this.cancelKeyListen();
+        return;
+      }
+
+      // Bind the new key
+      if (this.inputManager) {
+        this.inputManager.rebindKey(this.listeningAction, e.code);
+        this.inputManager.saveBindings();
+      }
+
+      // Update display
+      element.textContent = this.formatKeyName(e.code);
+      this.cancelKeyListen();
+    };
+
+    window.addEventListener('keydown', this.keyListenHandler, true);
+  }
+
+  /**
+   * Cancel key listening mode
+   */
+  cancelKeyListen() {
+    if (this.listeningForKey) {
+      this.listeningForKey.classList.remove('options-menu__binding-key--listening');
+      this.listeningForKey.textContent = this.getKeyDisplayName(this.listeningAction);
+      this.listeningForKey = null;
+      this.listeningAction = null;
+    }
+
+    if (this.keyListenHandler) {
+      window.removeEventListener('keydown', this.keyListenHandler, true);
+      this.keyListenHandler = null;
+    }
+  }
+
+  /**
+   * Refresh all binding displays
+   */
+  refreshBindings() {
+    for (const [action, element] of this.bindingElements) {
+      element.textContent = this.getKeyDisplayName(action);
+    }
   }
 
   /**
@@ -608,9 +783,12 @@ export class OptionsMenu {
       panel.classList.toggle('options-menu__panel--active', id === tabId);
     }
 
-    // Refresh gamepad status when switching to controls tab
-    if (tabId === 'controls' && this.gamepadStatusElement) {
-      this.updateGamepadStatus(this.gamepadStatusElement);
+    // Refresh gamepad status and bindings when switching to controls tab
+    if (tabId === 'controls') {
+      if (this.gamepadStatusElement) {
+        this.updateGamepadStatus(this.gamepadStatusElement);
+      }
+      this.refreshBindings();
     }
   }
 
@@ -632,10 +810,12 @@ export class OptionsMenu {
     if (this.inputManager) {
       this.inputManager.setGamepadDeadzone(0.15);
       this.inputManager.resetBindings();
+      this.inputManager.saveBindings();
     }
 
-    // Update sliders
+    // Update sliders and bindings
     this.updateSliderValues();
+    this.refreshBindings();
   }
 
   /**
