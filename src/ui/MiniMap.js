@@ -525,6 +525,12 @@ export class MiniMap {
    */
   show() {
     this.uiManager.showOverlay('minimap');
+    // Force block display (not flex) for proper positioning
+    if (this.element) {
+      this.element.style.display = 'block';
+    }
+    // Render immediately to show content
+    this.render();
   }
 
   /**

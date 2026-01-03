@@ -370,6 +370,8 @@ export class Game {
 
     // Create Fuel System
     this.fuelSystem = new FuelSystem();
+    // Start with 50% fuel
+    this.fuelSystem.setFuelLevel(this.fuelSystem.getTankCapacity() * 0.5);
     this.fuelSystem.onFuelLow = (level, percent) => {
       if (this.notification) {
         this.notification.show({
@@ -1335,7 +1337,8 @@ export class Game {
     this.truckSpeed = currentSpeed;
 
     // Get forward direction from truck rotation
-    const forward = new THREE.Vector3(0, 0, 1);
+    // The truck model is rotated 180° to face -Z, so forward is -Z in local space
+    const forward = new THREE.Vector3(0, 0, -1);
     forward.applyQuaternion(this.testTruck.quaternion);
 
     // Apply engine force (throttle)
